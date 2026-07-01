@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { flip } from 'svelte/animate';
-	import { cubicOut, quintOut } from 'svelte/easing';
+	import { linear, cubicOut, quintOut } from 'svelte/easing';
 	import { Tween, prefersReducedMotion } from 'svelte/motion';
 	import { writable } from 'svelte/store';
 	import { onMount, tick } from 'svelte';
@@ -49,6 +49,7 @@
 	type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
 	const METADATA_SAFETY_POLL_MS = 120_000;
+	const TRACK_TIME_TICK_MS = 1000;
 	const LISTENING_HISTORY_LIMIT = 30;
 	const LISTENING_HISTORY_STORAGE_KEY = 'frisson-listening-history-v1';
 	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
@@ -181,6 +182,7 @@
 	let playbackError = $state('');
 	let shareMessage = $state('');
 	let currentTrack = $state<CurrentTrack | null>(null);
+	let currentTrackClockMs = $state(Date.now());
 	const listeningHistory = writable<ListeningHistoryItem[]>([]);
 	let lastHistorySignature = '';
 	let metadataState = $state<MetadataState>('idle');
@@ -232,10 +234,17 @@
 	const fipInfoScale = $derived(0.96 + fipInfoMotion.current * 0.04);
 	const fipInfoOffset = $derived((1 - fipInfoMotion.current) * 10);
 	const fipInfoBackdropOpacity = $derived(fipInfoMotion.current);
-	const playbackProgress = $derived(isPlaying ? 1 : isLoading ? 0.35 : 0);
+	const trackTiming = $derived(getTrackTiming(currentTrack, currentTrackClockMs));
+	const playbackProgress = $derived(trackTiming?.progress ?? (isPlaying ? 1 : isLoading ? 0.35 : 0));
+	const currentTrackTimeLabel = $derived(
+		trackTiming
+			? `${formatTrackTime(trackTiming.elapsedSeconds)} / ${formatTrackTime(trackTiming.durationSeconds)}`
+			: ''
+	);
 	const playbackProgressMotion = Tween.of(() => playbackProgress, {
-		duration: () => (prefersReducedMotion.current ? 0 : 300),
-		easing: quintOut
+		duration: () =>
+			prefersReducedMotion.current || trackTiming === null ? 0 : TRACK_TIME_TICK_MS,
+		easing: linear
 	});
 	const statusLabel = $derived(
 		playbackState === 'playing'
@@ -251,6 +260,20 @@
 	const currentTrackAppleMusicMode = $derived.by(() => {
 		void appleMusicLookupRevision;
 		return currentTrack && !hasNoAppleMusicMatch(currentTrack) ? 'button' : 'none';
+	});
+	$effect(() => {
+		const timingBounds = getTrackTimingBounds(currentTrack);
+		if (!timingBounds) return;
+
+		currentTrackClockMs = Math.min(Date.now(), timingBounds.endMs);
+		if (currentTrackClockMs >= timingBounds.endMs) return;
+
+		const tick = window.setInterval(() => {
+			currentTrackClockMs = Math.min(Date.now(), timingBounds.endMs);
+			if (currentTrackClockMs >= timingBounds.endMs) window.clearInterval(tick);
+		}, TRACK_TIME_TICK_MS);
+
+		return () => window.clearInterval(tick);
 	});
 
 	$effect(() => {
@@ -426,6 +449,35 @@
 			typeof item.listenedAt === 'number' &&
 			Number.isFinite(item.listenedAt)
 		);
+	}
+
+	function getTrackTiming(track: CurrentTrack | null, nowMs: number) {
+		const bounds = getTrackTimingBounds(track);
+		if (!bounds) return null;
+
+		const elapsedSeconds = Math.min(Math.max(nowMs / 1000 - bounds.startSeconds, 0), bounds.durationSeconds);
+		return {
+			...bounds,
+			elapsedSeconds,
+			progress: elapsedSeconds / bounds.durationSeconds
+		};
+	}
+
+	function getTrackTimingBounds(track: CurrentTrack | null) {
+		if (!track || track.start <= 0 || track.end <= track.start) return null;
+
+		return {
+			startSeconds: track.start,
+			durationSeconds: track.end - track.start,
+			endMs: track.end * 1000
+		};
+	}
+
+	function formatTrackTime(totalSeconds: number) {
+		const seconds = Math.max(0, Math.floor(totalSeconds));
+		const minutes = Math.floor(seconds / 60);
+		const remainingSeconds = seconds % 60;
+		return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
 	}
 
 	function toggleTheme() {
@@ -1075,9 +1127,10 @@
 						style:transform={`scaleX(${prefersReducedMotion.current ? playbackProgress : playbackProgressMotion.current})`}
 					></div>
 				</div>
-				<div class="mt-1.5 flex justify-between text-xs tabular-nums text-ink-tertiary">
+				<div class="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center text-xs tabular-nums text-ink-tertiary">
 					<span>Live</span>
-					<span>{isLoading ? 'Buffering' : isPlaying ? '∞' : 'Paused'}</span>
+					<span class="text-center">{currentTrackTimeLabel}</span>
+					<span class="text-right">{isLoading ? 'Buffering' : isPlaying ? '∞' : 'Paused'}</span>
 				</div>
 			</div>
 

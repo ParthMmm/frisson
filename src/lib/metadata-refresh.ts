@@ -1,5 +1,5 @@
 export const METADATA_FALLBACK_CACHE_MS = 30_000;
-export const METADATA_REFRESH_GRACE_MS = 5_000;
+export const METADATA_REFRESH_GRACE_MS = 10_000;
 export const METADATA_STALE_RETRY_MS = 5_000;
 
 export type MetadataState = 'idle' | 'loading' | 'ready' | 'error';

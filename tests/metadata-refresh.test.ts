@@ -23,8 +23,8 @@ const trackEndSeconds = (now + 10_000) / 1000;
 
 assertAtLeast(
 	METADATA_REFRESH_GRACE_MS,
-	5_000,
-	'metadata refresh grace waits for Radio France boundary lag',
+	10_000,
+	'metadata refresh grace waits for Radio France crossfade lag',
 );
 assertEqual(
 	getMetadataRefreshDelay(now, trackEndSeconds),
@@ -42,13 +42,13 @@ assertEqual(
 	'metadata refresh delay waits out the grace window after track end',
 );
 assertEqual(
-	getMetadataRefreshDelay(now + 16_000, trackEndSeconds),
+	getMetadataRefreshDelay(now + 21_000, trackEndSeconds),
 	METADATA_STALE_RETRY_MS,
 	'stale metadata retries quickly after the grace window',
 );
 assertEqual(
-	getCurrentTrackCacheExpiresAt(now + 16_000, trackEndSeconds, 30_000),
-	now + 16_000 + METADATA_STALE_RETRY_MS,
+	getCurrentTrackCacheExpiresAt(now + 21_000, trackEndSeconds, 30_000),
+	now + 21_000 + METADATA_STALE_RETRY_MS,
 	'stale metadata cache expires on the retry cadence',
 );
 assertEqual(
