@@ -1,0 +1,80 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+@theme {
+	--font-sans:
+		-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Inter, ui-sans-serif,
+		sans-serif;
+
+	/* --- Raw scales -----------------------------------------------------
+	   Two oklch scales, constant hue/near-constant chroma, light (50) to
+	   dark (950) — the only place colors are actually chosen. Everything
+	   below (light + dark theme) just points roles at a step. Add a role by
+	   picking a step; add a step by extending these two blocks. */
+
+	/* sand: warm neutral, hue 75 */
+	--color-sand-50: oklch(99% 0.003 75);
+	--color-sand-100: oklch(96.5% 0.005 75);
+	--color-sand-200: oklch(92% 0.006 75);
+	--color-sand-300: oklch(86% 0.007 75);
+	--color-sand-400: oklch(76% 0.009 75);
+	--color-sand-500: oklch(63% 0.01 75);
+	--color-sand-600: oklch(50% 0.01 75);
+	--color-sand-700: oklch(38.5% 0.009 75);
+	--color-sand-800: oklch(27.5% 0.008 75);
+	--color-sand-900: oklch(20.5% 0.006 75);
+	--color-sand-950: oklch(15% 0.005 75);
+
+	/* coral: brand accent, hue 25 (~#FF4433) */
+	--color-coral-100: oklch(93% 0.045 25);
+	--color-coral-400: oklch(70% 0.185 25);
+	--color-coral-500: oklch(64% 0.205 25);
+	--color-coral-900: oklch(30% 0.075 25);
+
+	/* --- Semantic roles (light) ------------------------------------------
+	   What components actually use: bg-surface, text-ink, etc. */
+	--color-surface: var(--color-sand-50);
+	--color-canvas: var(--color-sand-100);
+	--color-divider: var(--color-sand-200);
+	--color-ink: var(--color-sand-950);
+	--color-ink-secondary: var(--color-sand-600);
+	--color-ink-tertiary: var(--color-sand-400);
+	--color-accent: var(--color-coral-500);
+	--color-accent-subtle: var(--color-coral-100);
+
+	/* Radius roles */
+	--radius-card: 2rem;
+}
+
+:root {
+	color-scheme: light;
+}
+
+/* Dark theme: same two scales, roles just point at a different step.
+   Nothing here is a hand-picked color — it's a remap. */
+:root[data-theme='dark'] {
+	--color-surface: var(--color-sand-900);
+	--color-canvas: var(--color-sand-950);
+	--color-divider: var(--color-sand-800);
+	--color-ink: var(--color-sand-50);
+	--color-ink-secondary: var(--color-sand-400);
+	--color-ink-tertiary: var(--color-sand-600);
+	--color-accent: var(--color-coral-400);
+	--color-accent-subtle: var(--color-coral-900);
+	color-scheme: dark;
+}
+
+/* Suppress transitions for one frame while the theme flips, so color
+   variables don't visibly cross-fade every element on the page at once.
+   Global "*" selectors can't be expressed as a Tailwind utility. */
+[data-theme-switching] * {
+	transition: none !important;
+}
+
+body {
+	font-family: var(--font-sans);
+	font-feature-settings: 'tnum' 1;
+	-webkit-font-smoothing: antialiased;
+	background-color: var(--color-canvas);
+	color-scheme: inherit;
+}
