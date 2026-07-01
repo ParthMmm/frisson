@@ -50,6 +50,7 @@
 	const LISTENING_HISTORY_STORAGE_KEY = 'frisson-listening-history-v1';
 	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
 	const FAVORITE_STATIONS_STORAGE_KEY = 'frisson-favorite-stations-v1';
+	const FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY = 'frisson-favorite-stations-customized-v1';
 	const THEME_STORAGE_KEY = 'frisson-theme';
 	const LEGACY_THEME_STORAGE_KEY = 'fip-theme';
 	const SELECTED_STATION_STORAGE_KEY = 'frisson-selected-station';
@@ -176,7 +177,6 @@
 	const listeningHistory = writable<ListeningHistoryItem[]>([]);
 	let lastHistorySignature = '';
 	let metadataState = $state<MetadataState>('idle');
-	let metadataError = $state('');
 	let isAppleMusicLookupLoading = $state(false);
 	let appleMusicLookupRevision = $state(0);
 	let currentTrackRequest: AbortController | null = null;
@@ -327,7 +327,14 @@
 	function applyPersistedFavoriteStations() {
 		try {
 			const stored = localStorage.getItem(FAVORITE_STATIONS_STORAGE_KEY);
-			if (!stored) return;
+			if (!stored) {
+				if (localStorage.getItem(FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY)) {
+					for (const station of stations) {
+						station.favorite = false;
+					}
+				}
+				return;
+			}
 
 			const parsed: unknown = JSON.parse(stored);
 			if (!Array.isArray(parsed)) return;
@@ -351,10 +358,12 @@
 
 			if (favoriteNames.length === 0) {
 				localStorage.removeItem(FAVORITE_STATIONS_STORAGE_KEY);
+				localStorage.setItem(FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY, 'true');
 				return;
 			}
 
 			localStorage.setItem(FAVORITE_STATIONS_STORAGE_KEY, JSON.stringify(favoriteNames));
+			localStorage.setItem(FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY, 'true');
 		} catch {
 			/* private browsing, storage quota, etc. */
 		}
@@ -520,7 +529,6 @@
 
 		currentTrack = cached.track;
 		metadataState = 'ready';
-		metadataError = '';
 		scheduleNextMetadataRefresh(station, cached.track);
 		return true;
 	}
@@ -698,7 +706,6 @@
 		const controller = new AbortController();
 		currentTrackRequest = controller;
 		metadataState = 'loading';
-		metadataError = '';
 
 		try {
 			const params = new URLSearchParams({
@@ -722,7 +729,6 @@
 			if (controller.signal.aborted || !isCurrentTrackRequest(station, requestId)) return;
 
 			metadataState = 'error';
-			metadataError = 'Current track data is unavailable.';
 			scheduleNextMetadataRefresh(station, null);
 		} finally {
 			if (currentTrackRequest === controller) currentTrackRequest = null;
@@ -1037,7 +1043,6 @@
 				meta={currentTrack
 					? `${currentTrack.album}${currentTrack.year ? ` · ${currentTrack.year}` : ''}`
 					: `Radio France · ${selectedStation.tag}`}
-				notice={metadataError}
 				artworkUrl={currentTrack?.artworkUrl ?? null}
 				artworkAlt={currentTrack
 					? `Artwork for ${currentTrack.title} by ${currentTrack.artist}`

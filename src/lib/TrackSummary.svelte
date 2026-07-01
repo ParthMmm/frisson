@@ -8,7 +8,6 @@
 		title,
 		artist,
 		meta,
-		notice = '',
 		artworkUrl = null,
 		artworkAlt,
 		fallbackLabel = 'LIVE',
@@ -32,7 +31,6 @@
 		title: string;
 		artist: string;
 		meta: string;
-		notice?: string;
 		artworkUrl?: string | null;
 		artworkAlt: string;
 		fallbackLabel?: string;
@@ -142,10 +140,6 @@
 		{/if}
 		{#if meta}
 			<div class="truncate text-sm text-ink-tertiary">{meta}</div>
-		{/if}
-
-		{#if notice}
-			<div class="truncate text-xs text-ink-tertiary" role="status">{notice}</div>
 		{/if}
 
 		{#if appleMusicMode === 'button' && onAppleMusicClick}
