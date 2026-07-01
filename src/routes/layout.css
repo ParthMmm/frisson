@@ -42,6 +42,11 @@
 	--color-accent: var(--color-coral-500);
 	--color-accent-subtle: var(--color-coral-100);
 
+	/* One-off state color, not derived from sand/coral: distinct amber used
+	   only for the buffering/loading indicator, same value in both themes
+	   since it signals state rather than surface/text. */
+	--color-loading: oklch(72% 0.17 70);
+
 	/* Radius roles */
 	--radius-card: 2rem;
 }

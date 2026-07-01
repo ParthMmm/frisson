@@ -229,7 +229,13 @@
 	const stationPulseOpacity = $derived(
 		isPlaying && !prefersReducedMotion.current ? (1 - stationPulse.current) * 0.45 : 0
 	);
-	const stationDotColor = $derived(isLoading ? 'oklch(72% 0.17 70)' : 'var(--color-accent)');
+	const stationColorBlend = Tween.of(() => (isLoading ? 1 : 0), {
+		duration: () => (prefersReducedMotion.current ? 0 : 220),
+		easing: cubicOut
+	});
+	const stationDotColor = $derived(
+		`color-mix(in oklch, var(--color-loading) ${stationColorBlend.current * 100}%, var(--color-accent))`
+	);
 	const hasActivePlayback = $derived(isPlaying || isLoading);
 	const fipInfoScale = $derived(0.96 + fipInfoMotion.current * 0.04);
 	const fipInfoOffset = $derived((1 - fipInfoMotion.current) * 10);

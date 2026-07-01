@@ -53,6 +53,7 @@ Semantic roles are just a step from one of those two scales:
 | `--color-ink`           | `sand-950`      | Primary text, primary button fill                  |
 | `--color-accent`        | `coral-500`     | Live indicator, active state, progress fill, links |
 | `--color-accent-subtle` | `coral-100`     | Tint background for badges/favorited icons         |
+| `--color-loading`       | one-off amber   | Buffering/loading dot only; same value both themes |
 
 **Dark mode doesn't hand-pick new colors.** `:root[data-theme='dark']` in
 `layout.css` re-points the _same_ roles at _different steps of the same two
@@ -60,6 +61,15 @@ scales_ (e.g. `--color-surface: var(--color-sand-900)` instead of
 `sand-50`). If you're ever tempted to write a fresh `oklch(...)` value for a
 dark-mode override, stop — pick an existing sand/coral step instead, or add
 one to the scale if none fits.
+
+The one sanctioned exception is `--color-loading`: a single one-off amber
+token (not part of either scale) used only for the buffering-state dot,
+since no sand/coral step reads as "loading" without being confused for
+accent or an error state. It's still a named token, not a literal — code
+should never write `oklch(...)` inline (see the station-dot color blend in
+`+page.svelte`, which animates between `--color-loading` and `--color-accent`
+via `color-mix(in oklch, ...)` driven by a `Tween`, instead of swapping
+between two hardcoded strings).
 
 Components never branch on theme. If you write `class="bg-surface text-ink"`,
 it's already dark-mode-correct. **Do not add Tailwind `dark:` variants.**
@@ -101,8 +111,12 @@ nothing in it that couldn't be typed inline, it's just factored out so ten
 buttons can't drift out of sync. If a new shared combination emerges, add
 another constant next to `pressable`/`iconHit`; don't reach for
 `@layer components` or a new `.css` class. Reach for custom CSS only when
-Tailwind genuinely can't express it (the one example in this app is the
-`[data-theme-switching] *` global rule).
+Tailwind genuinely can't express it. The handful of examples in this app,
+all in `layout.css`: `[data-theme-switching] *` (global `*` selector),
+`.fip-info-dialog::backdrop` (the `::backdrop` pseudo-element isn't
+reachable from a utility class), and the `history-scroll-mask`
+`@property`/`@keyframes`/`animation-timeline: scroll()` block (scroll-driven
+CSS animations have no Tailwind utility surface).
 
 ## Patterns to follow
 
