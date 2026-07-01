@@ -4,7 +4,7 @@
 	import { Tween, prefersReducedMotion } from 'svelte/motion';
 	import { writable } from 'svelte/store';
 	import { onMount, tick } from 'svelte';
-	import { fade, fly } from 'svelte/transition';
+	import { fade } from 'svelte/transition';
 	import { normalizeTrackText } from '$lib/text';
 	import { isAbortError } from '$lib/errors';
 	import {
@@ -203,12 +203,14 @@
 	// Shared Tailwind class strings instead of custom CSS classes — one
 	// definition, applied wherever a button needs it, no `@layer components`.
 	// `pressable`: press feedback, focus ring, reduced-motion handling.
-	// `iconHit`: pads a small round icon button's hit target to ~44px via a
-	// `before:` pseudo-element without changing its visible size.
+	// `iconHit`: pads a small icon button's hit target to ~44px via a
+	// `before:` pseudo-element without changing its visible size. Radius is
+	// `28%` (not `rounded-full`) to match the squircle corner ratio of the
+	// transport controls (`size-14 rounded-2xl` below) at any icon-button size.
 	const pressable =
 		"transition-[background-color,color,transform] duration-150 ease-out touch-manipulation active:scale-[0.97] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink motion-reduce:active:scale-100 motion-reduce:transition-none";
 	const iconHit =
-		"relative flex items-center justify-center rounded-full before:absolute before:-inset-2 before:content-['']";
+		"relative flex items-center justify-center rounded-[28%] before:absolute before:-inset-2 before:content-['']";
 	const historyArrivalGlow = new Tween(0, {
 		duration: () => (prefersReducedMotion.current ? 0 : 520),
 		easing: quintOut
@@ -258,6 +260,11 @@
 			? `${formatTrackTime(trackTiming.elapsedSeconds)} / ${formatTrackTime(trackTiming.durationSeconds)}`
 			: ''
 	);
+	// Radio France crossfades into the next track before its metadata refresh
+	// lands (see METADATA_REFRESH_GRACE_MS) — elapsed time caps at the track's
+	// duration in that window, so this is true for the few seconds the old
+	// track has "ended" but `currentTrack` hasn't flipped to the new song yet.
+	const isCrossfading = $derived(isPlaying && trackTiming !== null && trackTiming.progress >= 1);
 	const playbackProgressMotion = Tween.of(() => playbackProgress, {
 		duration: () =>
 			prefersReducedMotion.current || trackTiming === null ? 0 : TRACK_TIME_TICK_MS,
@@ -265,7 +272,9 @@
 	});
 	const statusLabel = $derived(
 		playbackState === 'playing'
-			? 'On air'
+			? isCrossfading
+				? 'Changing track'
+				: 'On air'
 			: playbackState === 'loading'
 				? isPlaybackRecoveryPending
 					? 'Reconnecting'
@@ -712,6 +721,19 @@
 		}
 	}
 
+	// Custom transition instead of `fly`: a new row still slides down from
+	// above (`translateY` from -12px), but also scales up from 97%, so it
+	// reads as popping into place rather than just sliding — a small echo of
+	// the glow bloom (`historyArrivalGlow` below) that blooms under it.
+	function historyItemEnter(_node: Element) {
+		return {
+			duration: prefersReducedMotion.current ? 0 : 220,
+			easing: quintOut,
+			css: (t: number) =>
+				`transform: translateY(${(1 - t) * -12}px) scale(${0.97 + t * 0.03}); opacity: ${t}`
+		};
+	}
+
 	async function pulseHistoryArrival() {
 		const pulse = ++historyArrivalPulse;
 		await historyArrivalGlow.set(0, { duration: 0 });
@@ -1041,10 +1063,22 @@
 						type="button"
 						aria-label="What is FIP?"
 						aria-haspopup="dialog"
-						class="{iconHit} {pressable} size-7 border border-divider text-xs font-bold text-ink-secondary hover:bg-canvas"
+						class="{iconHit} {pressable} size-7 border border-divider text-ink-secondary hover:bg-canvas"
 						onclick={openFipInfo}
 					>
-						?
+						<svg
+							viewBox="0 0 24 24"
+							class="size-3.5"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+							<path d="M12 17h.01" />
+						</svg>
 					</button>
 				</div>
 				<div class="flex items-center gap-3">
@@ -1065,10 +1099,16 @@
 								stroke-linecap="round"
 								aria-hidden="true"
 							>
-								<circle cx="12" cy="12" r="4" />
-								<path
-									d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"
-								/>
+								<!-- Scaled down 15% about the center: at full size the ray tips
+								     sit right at the viewBox edge, reading visually larger than
+								     the star/share/moon icons, which all keep more inset margin.
+								     This brings its apparent size back in line with its siblings. -->
+								<g transform="translate(12 12) scale(0.85) translate(-12 -12)">
+									<circle cx="12" cy="12" r="4" />
+									<path
+										d="M12 2v2M12 20v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2 12h2M20 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"
+									/>
+								</g>
 							</svg>
 						{:else}
 							<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1133,7 +1173,17 @@
 						class="{iconHit} {pressable} size-9 border border-divider text-ink-secondary hover:bg-canvas"
 						onclick={shareStation}
 					>
-						<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+						<!-- `-translate-y-px`: the open tray at the bottom carries more ink
+						     than the arrow above it, so centering by bounding box alone
+						     reads as slightly low. Nudging up 1px optically balances it. -->
+						<svg
+							viewBox="0 0 24 24"
+							class="size-4 -translate-y-px"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							aria-hidden="true"
+						>
 							<path
 								stroke-linecap="round"
 								stroke-linejoin="round"
@@ -1157,25 +1207,12 @@
 					>
 				{/key}
 			</h1>
-			<p class="mt-3 flex items-center gap-2 text-ink-secondary">
-				<span>Radio France · webradio</span>
-				{#if statusLabel}
-					<span class="text-ink-tertiary">—</span>
-					<span
-						class="inline-flex items-center gap-1.5 font-medium text-accent"
-						role="status"
-						aria-live="polite"
-					>
-						{#if isLoading}
-							<span
-								class="size-1.5 rounded-full bg-current {isPlaybackRecoveryPending ? 'animate-pulse motion-reduce:animate-none' : ''}"
-								aria-hidden="true"
-							></span>
-						{/if}
-						{statusLabel}
-					</span>
-				{/if}
-			</p>
+			<p class="mt-3 text-sm font-medium tracking-wide text-ink-tertiary">Radio France</p>
+			<!-- Visually hidden: playback state (Buffering/Reconnecting/Paused/etc.) is
+			     still announced to screen readers even though the status text is no
+			     longer shown — it's already conveyed visually via the scrubber's
+			     right-hand label and the live-station dot. -->
+			<span class="sr-only" role="status" aria-live="polite">{statusLabel}</span>
 			{#if playbackError}
 				<p class="mt-2 text-sm font-medium text-accent" role="alert">{playbackError}</p>
 			{/if}
@@ -1236,7 +1273,82 @@
 				<div class="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center text-xs tabular-nums text-ink-tertiary">
 					<span>Live</span>
 					<span class="text-center">{currentTrackTimeLabel}</span>
-					<span class="text-right">{isPlaybackRecoveryPending ? 'Retrying stream…' : isLoading ? 'Buffering' : isPlaying ? '∞' : 'Paused'}</span>
+					<span class="flex items-center justify-end">
+						{#if isPlaybackRecoveryPending}
+							<svg
+								viewBox="0 0 24 24"
+								class="size-3.5 animate-spin motion-reduce:animate-none"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								aria-hidden="true"
+							>
+								<polyline stroke-linecap="round" stroke-linejoin="round" points="23 4 23 10 17 10" />
+								<polyline stroke-linecap="round" stroke-linejoin="round" points="1 20 1 14 7 14" />
+								<path
+									stroke-linecap="round"
+									stroke-linejoin="round"
+									d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
+								/>
+							</svg>
+							<span class="sr-only">Retrying stream…</span>
+						{:else if isLoading}
+							<svg
+								viewBox="0 0 24 24"
+								class="size-3.5 animate-spin motion-reduce:animate-none"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								aria-hidden="true"
+							>
+								<circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
+								<path stroke-linecap="round" d="M21 12a9 9 0 0 0-9-9" />
+							</svg>
+							<span class="sr-only">Buffering</span>
+						{:else if isCrossfading}
+							<!-- Each triangle pulses opacity in antiphase (see
+							     `icon-crossfade-pulse` in layout.css) so one dims as the
+							     other brightens — the icon's shape already reads as "two
+							     things handing off"; the motion makes it read as a
+							     crossfade instead of a static, inert glyph. -->
+							<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor" aria-hidden="true">
+								<path
+									d="M3 6v12l9-6-9-6z"
+									class="[animation:icon-crossfade-pulse_1.6s_ease-in-out_infinite] motion-reduce:[animation:none]"
+								/>
+								<path
+									d="M21 6v12l-9-6 9-6z"
+									class="[animation-delay:-0.8s] [animation:icon-crossfade-pulse_1.6s_ease-in-out_infinite] motion-reduce:[animation:none]"
+								/>
+							</svg>
+							<span class="sr-only">Changing track</span>
+						{:else if isPlaying}
+							<svg
+								viewBox="0 0 24 24"
+								class="size-3.5"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="2"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								aria-hidden="true"
+							>
+								<path
+									d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.26-8-12.356-8-5.095 0-5.095 8 0 8 5.096 0 7.26-8 12.356-8z"
+								/>
+							</svg>
+							<span class="sr-only">Live</span>
+						{:else}
+							<!-- Not the transport button's pause glyph (two bars) — that
+							     exact shape appears on the play/pause button below to mean
+							     "tap to pause", so reusing it here as a passive "Paused"
+							     status would sit right above a button showing the opposite
+							     icon (▶ play) and read as contradictory. A plain dot, same
+							     language as the on-air indicator above, just says "idle". -->
+							<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
+							<span class="sr-only">Paused</span>
+						{/if}
+					</span>
 				</div>
 			</div>
 
@@ -1262,7 +1374,7 @@
 				>
 					{#if isLoading}
 						<svg viewBox="0 0 24 24" class="size-4" fill="currentColor" aria-hidden="true">
-							<rect x="7" y="7" width="10" height="10" rx="1.5" />
+							<rect x="4" y="4" width="16" height="16" rx="2" />
 						</svg>
 					{:else if isPlaying}
 						<svg viewBox="0 0 24 24" class="size-4" fill="currentColor" aria-hidden="true">
@@ -1394,13 +1506,8 @@
 					>
 						{#each $listeningHistory as item, index (item.id)}
 							<li
-								class="relative rounded-2xl border border-divider bg-canvas/40 p-3 transition-colors hover:bg-canvas motion-reduce:transition-none"
-								in:fly={{
-									y: prefersReducedMotion.current ? 0 : -12,
-									duration: prefersReducedMotion.current ? 0 : 220,
-									opacity: prefersReducedMotion.current ? 1 : 0,
-									easing: quintOut
-								}}
+								class="relative rounded-2xl border border-divider bg-canvas/40 p-3 transition-colors will-change-transform hover:bg-canvas motion-reduce:transition-none"
+								in:historyItemEnter
 								out:fade={{ duration: prefersReducedMotion.current ? 0 : 90 }}
 								animate:flip={{ duration: prefersReducedMotion.current ? 0 : 220, easing: cubicOut }}
 							>

@@ -100,11 +100,15 @@ constant in `+page.svelte`'s `<script>`, interpolated into `class=""`:
   and `prefers-reduced-motion` handling. Put this on every interactive
   `<button>` and on rows that act like one:
   `class="{pressable} flex h-14 ..."`.
-- **`iconHit`** — for round icon-only buttons. Keeps the _visible_ circle
-  small (matches the reference design, e.g. `size-9`, `size-8`) but pads the
-  actual hit target out to ~44px via a `before:` pseudo-element utility, so
-  touch targets are comfortable without changing how the control looks.
-  Combine with `pressable`: `class="{iconHit} {pressable} size-9 ..."`.
+- **`iconHit`** — for small icon-only buttons. Uses `rounded-[28%]`, not
+  `rounded-full` — a percentage radius scales with the button itself, so it
+  keeps the same squircle corner ratio as the transport controls
+  (`size-14 rounded-2xl`, 16px on 56px ≈ 28%) at any icon-button size instead
+  of introducing a second, circular shape language. Keeps the _visible_
+  button small (matches the reference design, e.g. `size-9`, `size-8`) but
+  pads the actual hit target out to ~44px via a `before:` pseudo-element
+  utility, so touch targets are comfortable without changing how the control
+  looks. Combine with `pressable`: `class="{iconHit} {pressable} size-9 ..."`.
 
 This is a Tailwind-utility string, not a hand-written CSS rule — there's
 nothing in it that couldn't be typed inline, it's just factored out so ten

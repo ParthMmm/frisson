@@ -19,6 +19,10 @@
 	--color-sand-300: oklch(86% 0.007 75);
 	--color-sand-400: oklch(76% 0.009 75);
 	--color-sand-500: oklch(63% 0.01 75);
+	/* 520/580 exist only for ink-tertiary: 4.5:1 needs a step between 500
+	   and 600 that 400/600 alone don't hit against surface+canvas. */
+	--color-sand-520: oklch(60.5% 0.01 75);
+	--color-sand-580: oklch(54% 0.009 75);
 	--color-sand-600: oklch(50% 0.01 75);
 	--color-sand-700: oklch(38.5% 0.009 75);
 	--color-sand-800: oklch(27.5% 0.008 75);
@@ -28,7 +32,9 @@
 	/* coral: brand accent, hue 25 (~#FF4433) */
 	--color-coral-100: oklch(93% 0.045 25);
 	--color-coral-400: oklch(70% 0.185 25);
-	--color-coral-500: oklch(64% 0.205 25);
+	/* 56% (not the original 64%) — 64% only cleared 3.6:1 against light
+	   surface/canvas, failing WCAG AA text contrast (4.5:1). */
+	--color-coral-500: oklch(56% 0.205 25);
 	--color-coral-900: oklch(30% 0.075 25);
 
 	/* --- Semantic roles (light) ------------------------------------------
@@ -38,7 +44,7 @@
 	--color-divider: var(--color-sand-200);
 	--color-ink: var(--color-sand-950);
 	--color-ink-secondary: var(--color-sand-600);
-	--color-ink-tertiary: var(--color-sand-400);
+	--color-ink-tertiary: var(--color-sand-580);
 	--color-accent: var(--color-coral-500);
 	--color-accent-subtle: var(--color-coral-100);
 
@@ -63,7 +69,7 @@
 	--color-divider: var(--color-sand-800);
 	--color-ink: var(--color-sand-50);
 	--color-ink-secondary: var(--color-sand-400);
-	--color-ink-tertiary: var(--color-sand-600);
+	--color-ink-tertiary: var(--color-sand-520);
 	--color-accent: var(--color-coral-400);
 	--color-accent-subtle: var(--color-coral-900);
 	color-scheme: dark;
@@ -86,6 +92,24 @@
 	syntax: '<length-percentage>';
 	inherits: false;
 	initial-value: 100%;
+}
+
+/* Crossfade status icon (two triangles pointing at each other): each path
+   pulses opacity 1 → 0.25 → 1. Applied to both paths with the second path's
+   animation-delay offset by exactly -half the duration, so they land in
+   antiphase — one path is dimming while the other brightens, echoing the
+   audio crossfade the icon represents. One keyframe, no separate "in"/"out"
+   variant needed. Can't express a negative animation-delay phase offset or a
+   named keyframe as a Tailwind utility, hence the raw CSS. */
+@keyframes icon-crossfade-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+
+	50% {
+		opacity: 0.25;
+	}
 }
 
 @keyframes history-scroll-mask {
