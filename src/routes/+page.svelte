@@ -1519,36 +1519,47 @@
 					>
 						{#each $listeningHistory as item, index (item.id)}
 							<li
-								class="relative rounded-2xl border border-divider bg-canvas/40 p-3 transition-colors will-change-transform hover:bg-canvas motion-reduce:transition-none"
-								in:historyItemEnter
 								out:fade={{ duration: prefersReducedMotion.current ? 0 : 90 }}
 								animate:flip={{ duration: prefersReducedMotion.current ? 0 : 220, easing: cubicOut }}
 							>
-								{#if index === 0}
-									<div
-										class="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(circle_at_18%_50%,color-mix(in_oklch,var(--color-accent)_24%,transparent),transparent_54%)] will-change-[transform,opacity] motion-reduce:hidden"
-										style:opacity={prefersReducedMotion.current ? 0 : historyArrivalGlow.current * 0.22}
-										style:transform={`scale(${0.96 + historyArrivalGlow.current * 0.07})`}
-										aria-hidden="true"
-									></div>
-								{/if}
-								<div class="relative">
-									<TrackSummary
-										rowClass="flex items-center gap-3"
-										artworkSize="md"
-										title={item.title}
-										artist={item.artist}
-										meta={`${formatHistoryTimestamp(item.listenedAt)} · ${item.stationName}`}
-										artworkUrl={item.artworkUrl}
-										artworkAlt={`Artwork for ${item.title} by ${item.artist}`}
-										fallbackAriaLabel={`Live badge for ${item.stationName}`}
-										appleMusicMode="link"
-										appleMusicHref={item.appleMusicUrl}
-										appleMusicLoading={item.isAppleMusicLookupLoading}
-										badgeLabel={index === 0 ? 'Latest' : ''}
-										titleFirst
-										{pressable}
-									/>
+								<!-- `in:historyItemEnter` lives on this inner wrapper, not the <li>
+								     that carries `animate:flip`. If a second track arrives while a
+								     row's enter transition is still mid-flight, Svelte's flip reads
+								     getComputedStyle(node).transform once and bakes that half-finished
+								     value in as a static prefix for the whole reorder animation — the
+								     row gets stuck slightly scaled/offset, then pops to normal when the
+								     animation ends. Keeping the two transforms on separate elements
+								     means flip always starts from a clean `none` baseline. -->
+								<div
+									class="relative rounded-2xl border border-divider bg-canvas/40 p-3 transition-colors will-change-transform hover:bg-canvas motion-reduce:transition-none"
+									in:historyItemEnter
+								>
+									{#if index === 0}
+										<div
+											class="pointer-events-none absolute inset-0 rounded-[inherit] bg-[radial-gradient(circle_at_18%_50%,color-mix(in_oklch,var(--color-accent)_24%,transparent),transparent_54%)] will-change-[transform,opacity] motion-reduce:hidden"
+											style:opacity={prefersReducedMotion.current ? 0 : historyArrivalGlow.current * 0.22}
+											style:transform={`scale(${0.96 + historyArrivalGlow.current * 0.07})`}
+											aria-hidden="true"
+										></div>
+									{/if}
+									<div class="relative">
+										<TrackSummary
+											rowClass="flex items-center gap-3"
+											artworkSize="md"
+											title={item.title}
+											artist={item.artist}
+											meta={`${formatHistoryTimestamp(item.listenedAt)} · ${item.stationName}`}
+											artworkUrl={item.artworkUrl}
+											artworkAlt={`Artwork for ${item.title} by ${item.artist}`}
+											fallbackAriaLabel={`Live badge for ${item.stationName}`}
+											appleMusicMode="link"
+											appleMusicHref={item.appleMusicUrl}
+											appleMusicLoading={item.isAppleMusicLookupLoading}
+											badgeLabel={index === 0 ? 'Latest' : ''}
+											titleFirst
+											{pressable}
+										/>
+									</div>
 								</div>
 							</li>
 						{/each}
