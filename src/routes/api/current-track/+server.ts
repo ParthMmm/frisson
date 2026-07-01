@@ -1,7 +1,12 @@
 import { error, json } from '@sveltejs/kit';
 import { isAbortError } from '$lib/errors';
-import { buildCurrentTrack, type LiveTrackMetadata } from '$lib/current-track';
-import type { CurrentTrack } from '$lib/api';
+import {
+	buildCurrentTrack,
+	selectCurrentLiveTrack,
+	type GraphTrackMetadata,
+	type LiveMetadataSnapshot,
+	type LiveTrackMetadata,
+} from '$lib/current-track';
 import type { RequestHandler } from './$types';
 
 type RadioFranceTrack = {
@@ -27,15 +32,18 @@ type RadioFranceCurrentTrackResponse = {
 	errors?: { message?: string }[];
 };
 
+type LiveMetadataRow = {
+	cover?: unknown;
+	songUuid?: unknown;
+	firstLine?: unknown;
+	secondLine?: unknown;
+	startTime?: unknown;
+	endTime?: unknown;
+};
+
 type LiveMetadataResponse = {
-	now?: {
-		cover?: unknown;
-		songUuid?: unknown;
-		firstLine?: unknown;
-		secondLine?: unknown;
-		startTime?: unknown;
-		endTime?: unknown;
-	} | null;
+	now?: LiveMetadataRow | null;
+	next?: (LiveMetadataRow | null)[] | null;
 };
 
 const RADIO_FRANCE_GRAPHQL_ENDPOINT = 'https://openapi.radiofrance.fr/v1/graphql';
@@ -86,50 +94,41 @@ export const GET: RequestHandler = async ({ fetch, request, url, platform }) => 
 		error(400, 'Unknown station');
 	}
 
-	const response = await fetch(RADIO_FRANCE_GRAPHQL_ENDPOINT, {
-		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			'x-token': token,
-		},
-		body: JSON.stringify({
-			query: CURRENT_TRACK_QUERY,
-			variables: { station },
+	const liveSnapshotPromise = loadCurrentLiveMetadata(
+		fetch,
+		stationName,
+		stationNumber,
+		request.signal,
+	);
+	const [response, liveSnapshot] = await Promise.all([
+		fetch(RADIO_FRANCE_GRAPHQL_ENDPOINT, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'x-token': token,
+			},
+			body: JSON.stringify({
+				query: CURRENT_TRACK_QUERY,
+				variables: { station },
+			}),
+			signal: request.signal,
 		}),
-		signal: request.signal,
-	});
+		liveSnapshotPromise,
+	]);
 
 	if (!response.ok) error(502, `Radio France metadata returned HTTP ${response.status}`);
 
 	const payload = (await response.json()) as RadioFranceCurrentTrackResponse;
 	if (payload.errors?.length) error(502, payload.errors[0]?.message ?? 'Metadata unavailable');
 
-	const song = payload.data?.live?.song;
-	if (!song?.track) return json(null satisfies CurrentTrack | null);
+	const live = payload.data?.live;
+	if (!live) error(502, 'Metadata unavailable');
 
-	const graphTitle = String(song.track.title ?? '').trim();
-	const graphArtist = song.track.mainArtists?.join(', ') || 'Unknown artist';
-	const liveTrack = await loadCurrentLiveMetadata(
-		fetch,
-		stationName,
-		stationNumber,
-		request.signal,
-	);
-	return json(
-		buildCurrentTrack(
-			station,
-			{
-				id: song.id,
-				title: graphTitle,
-				artist: graphArtist,
-				album: song.track.albumTitle,
-				year: song.track.productionDate,
-				start: song.start,
-				end: song.end,
-			},
-			liveTrack,
-		),
-	);
+	const graphTrack = toGraphTrackMetadata(live.song);
+	const liveTrack = selectCurrentLiveTrack(liveSnapshot, Date.now() / 1000);
+	const currentTrack = buildCurrentTrack(station, graphTrack, liveTrack);
+
+	return json(currentTrack);
 };
 
 async function loadCurrentLiveMetadata(
@@ -137,7 +136,7 @@ async function loadCurrentLiveMetadata(
 	stationName: string,
 	stationNumber: string,
 	signal: AbortSignal,
-): Promise<LiveTrackMetadata | null> {
+): Promise<LiveMetadataSnapshot | null> {
 	try {
 		const stationFormat = stationName === 'FIP' ? 'webrf_fip_player' : 'webrf_webradio_player';
 		const response = await fetch(
@@ -148,26 +147,64 @@ async function loadCurrentLiveMetadata(
 		if (!response.ok) return null;
 
 		const metadata = (await response.json()) as LiveMetadataResponse;
-		const now = metadata.now;
-		const cover = now?.cover;
-		const liveTrackId = now?.songUuid;
-		const title = String(now?.firstLine ?? '').trim();
-		const artist = String(now?.secondLine ?? '').trim();
-
-		if (typeof cover !== 'string' || typeof liveTrackId !== 'string' || !title || !artist) {
-			return null;
-		}
 
 		return {
-			id: liveTrackId,
-			title,
-			artist,
-			artworkUrl: `https://www.radiofrance.fr/pikapi/images/${cover}/200x200`,
-			start: typeof now?.startTime === 'number' ? now.startTime : null,
-			end: typeof now?.endTime === 'number' ? now.endTime : null,
+			now: parseLiveMetadataRow(metadata.now),
+			next: parseLiveMetadataRow(metadata.next?.[0]),
 		};
 	} catch (error) {
 		if (isAbortError(error)) throw error;
 		return null;
 	}
+}
+
+function toGraphTrackMetadata(song: RadioFranceSong | null | undefined): GraphTrackMetadata | null {
+	if (!song?.track) return null;
+
+	return {
+		id: song.id,
+		title: String(song.track.title ?? '').trim(),
+		artist: song.track.mainArtists?.join(', ') || 'Unknown artist',
+		album: song.track.albumTitle,
+		year: song.track.productionDate,
+		start: song.start,
+		end: song.end,
+	};
+}
+
+function parseLiveMetadataRow(row: LiveMetadataRow | null | undefined): LiveTrackMetadata | null {
+	if (row == null) return null;
+
+	const {
+		cover,
+		songUuid: liveTrackId,
+		firstLine: title,
+		secondLine: artist,
+		startTime,
+		endTime,
+	} = row;
+
+	if (
+		typeof cover !== 'string' ||
+		typeof liveTrackId !== 'string' ||
+		typeof title !== 'string' ||
+		typeof artist !== 'string'
+	) {
+		return null;
+	}
+
+	const trimmedCover = cover.trim();
+	const trimmedLiveTrackId = liveTrackId.trim();
+	const trimmedTitle = title.trim();
+	const trimmedArtist = artist.trim();
+	if (!trimmedCover || !trimmedLiveTrackId || !trimmedTitle || !trimmedArtist) return null;
+
+	return {
+		id: trimmedLiveTrackId,
+		title: trimmedTitle,
+		artist: trimmedArtist,
+		artworkUrl: `https://www.radiofrance.fr/pikapi/images/${trimmedCover}/200x200`,
+		start: typeof startTime === 'number' ? startTime : null,
+		end: typeof endTime === 'number' ? endTime : null,
+	};
 }
