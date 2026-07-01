@@ -734,6 +734,17 @@
 		};
 	}
 
+	// Circular clip-path wipe for swapping between the status icons — both the
+	// outgoing and incoming icon play this (in reverse for outgoing), so they
+	// cross-wipe instead of hard-cutting.
+	function clipRevealIcon(_node: Element) {
+		return {
+			duration: prefersReducedMotion.current ? 0 : 200,
+			easing: quintOut,
+			css: (t: number) => `clip-path: circle(${t * 100}% at 50% 50%)`
+		};
+	}
+
 	async function pulseHistoryArrival() {
 		const pulse = ++historyArrivalPulse;
 		await historyArrivalGlow.set(0, { duration: 0 });
@@ -1274,80 +1285,82 @@
 					<span>Live</span>
 					<span class="text-center">{currentTrackTimeLabel}</span>
 					<span class="flex items-center justify-end">
-						{#if isPlaybackRecoveryPending}
-							<svg
-								viewBox="0 0 24 24"
-								class="size-3.5 animate-spin motion-reduce:animate-none"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								aria-hidden="true"
+						<span class="relative size-3.5 shrink-0">
+							{#if isPlaybackRecoveryPending || isLoading}
+							<span
+								class="absolute inset-0 flex items-center justify-center"
+								transition:clipRevealIcon
 							>
-								<polyline stroke-linecap="round" stroke-linejoin="round" points="23 4 23 10 17 10" />
-								<polyline stroke-linecap="round" stroke-linejoin="round" points="1 20 1 14 7 14" />
-								<path
+								<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor" aria-hidden="true">
+									<circle
+										cx="5"
+										cy="12"
+										r="2.2"
+										class="[animation:icon-dot-bounce_1s_ease-in-out_infinite] motion-reduce:[animation:none]"
+									/>
+									<circle
+										cx="12"
+										cy="12"
+										r="2.2"
+										class="[animation-delay:150ms] [animation:icon-dot-bounce_1s_ease-in-out_infinite] motion-reduce:[animation:none]"
+									/>
+									<circle
+										cx="19"
+										cy="12"
+										r="2.2"
+										class="[animation-delay:300ms] [animation:icon-dot-bounce_1s_ease-in-out_infinite] motion-reduce:[animation:none]"
+									/>
+								</svg>
+								<span class="sr-only">{isPlaybackRecoveryPending ? 'Retrying stream…' : 'Buffering'}</span>
+							</span>
+						{:else if isCrossfading}
+							<span
+								class="absolute inset-0 flex items-center justify-center"
+								transition:clipRevealIcon
+							>
+								<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor" aria-hidden="true">
+									<path
+										d="M3 6v12l9-6-9-6z"
+										class="[animation:icon-crossfade-pulse_1.6s_ease-in-out_infinite] motion-reduce:[animation:none]"
+									/>
+									<path
+										d="M21 6v12l-9-6 9-6z"
+										class="[animation-delay:-0.8s] [animation:icon-crossfade-pulse_1.6s_ease-in-out_infinite] motion-reduce:[animation:none]"
+									/>
+								</svg>
+								<span class="sr-only">Changing track</span>
+							</span>
+						{:else if isPlaying}
+							<span
+								class="absolute inset-0 flex items-center justify-center"
+								transition:clipRevealIcon
+							>
+								<svg
+									viewBox="0 0 24 24"
+									class="size-3.5"
+									fill="none"
+									stroke="currentColor"
+									stroke-width="2"
 									stroke-linecap="round"
 									stroke-linejoin="round"
-									d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"
-								/>
-							</svg>
-							<span class="sr-only">Retrying stream…</span>
-						{:else if isLoading}
-							<svg
-								viewBox="0 0 24 24"
-								class="size-3.5 animate-spin motion-reduce:animate-none"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								aria-hidden="true"
-							>
-								<circle cx="12" cy="12" r="9" stroke-opacity="0.25" />
-								<path stroke-linecap="round" d="M21 12a9 9 0 0 0-9-9" />
-							</svg>
-							<span class="sr-only">Buffering</span>
-						{:else if isCrossfading}
-							<!-- Each triangle pulses opacity in antiphase (see
-							     `icon-crossfade-pulse` in layout.css) so one dims as the
-							     other brightens — the icon's shape already reads as "two
-							     things handing off"; the motion makes it read as a
-							     crossfade instead of a static, inert glyph. -->
-							<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor" aria-hidden="true">
-								<path
-									d="M3 6v12l9-6-9-6z"
-									class="[animation:icon-crossfade-pulse_1.6s_ease-in-out_infinite] motion-reduce:[animation:none]"
-								/>
-								<path
-									d="M21 6v12l-9-6 9-6z"
-									class="[animation-delay:-0.8s] [animation:icon-crossfade-pulse_1.6s_ease-in-out_infinite] motion-reduce:[animation:none]"
-								/>
-							</svg>
-							<span class="sr-only">Changing track</span>
-						{:else if isPlaying}
-							<svg
-								viewBox="0 0 24 24"
-								class="size-3.5"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="2"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-								aria-hidden="true"
-							>
-								<path
-									d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.26-8-12.356-8-5.095 0-5.095 8 0 8 5.096 0 7.26-8 12.356-8z"
-								/>
-							</svg>
-							<span class="sr-only">Live</span>
+									aria-hidden="true"
+								>
+									<path
+										d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.26-8-12.356-8-5.095 0-5.095 8 0 8 5.096 0 7.26-8 12.356-8z"
+									/>
+								</svg>
+								<span class="sr-only">Live</span>
+							</span>
 						{:else}
-							<!-- Not the transport button's pause glyph (two bars) — that
-							     exact shape appears on the play/pause button below to mean
-							     "tap to pause", so reusing it here as a passive "Paused"
-							     status would sit right above a button showing the opposite
-							     icon (▶ play) and read as contradictory. A plain dot, same
-							     language as the on-air indicator above, just says "idle". -->
-							<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
-							<span class="sr-only">Paused</span>
+							<span
+								class="absolute inset-0 flex items-center justify-center"
+								transition:clipRevealIcon
+							>
+								<span class="size-1.5 rounded-full bg-current" aria-hidden="true"></span>
+								<span class="sr-only">Paused</span>
+							</span>
 						{/if}
+						</span>
 					</span>
 				</div>
 			</div>

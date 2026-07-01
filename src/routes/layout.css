@@ -112,6 +112,18 @@
 	}
 }
 
+@keyframes icon-dot-bounce {
+	0%,
+	80%,
+	100% {
+		transform: translateY(0);
+	}
+
+	40% {
+		transform: translateY(-3px);
+	}
+}
+
 @keyframes history-scroll-mask {
 	0% {
 		--history-scroll-mask-top: 100%;
