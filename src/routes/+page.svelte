@@ -51,6 +51,7 @@
 	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
 	const THEME_STORAGE_KEY = 'frisson-theme';
 	const LEGACY_THEME_STORAGE_KEY = 'fip-theme';
+	const SELECTED_STATION_STORAGE_KEY = 'frisson-selected-station';
 	const APPLE_MUSIC_URL_CACHE_LIMIT = 128;
 	const historyTimeFormatter = new Intl.DateTimeFormat(undefined, {
 		hour: '2-digit',
@@ -231,6 +232,7 @@
 	onMount(() => {
 		// app.html already set this pre-paint; just mirror it into state.
 		theme = (document.documentElement.dataset.theme as 'light' | 'dark') ?? 'light';
+		selectedStationName = readPersistedSelectedStationName() ?? selectedStationName;
 		listeningHistory.set(readPersistedListeningHistory());
 		const unsubscribeListeningHistory = listeningHistory.subscribe(persistListeningHistory);
 		void loadCurrentTrack(selectedStation);
@@ -246,6 +248,25 @@
 			currentTrackRequest?.abort();
 		};
 	});
+
+	function readPersistedSelectedStationName() {
+		try {
+			const stored = localStorage.getItem(SELECTED_STATION_STORAGE_KEY);
+			if (!stored) return null;
+
+			return stations.some((station) => station.name === stored) ? stored : null;
+		} catch {
+			return null;
+		}
+	}
+
+	function persistSelectedStationName(name: string) {
+		try {
+			localStorage.setItem(SELECTED_STATION_STORAGE_KEY, name);
+		} catch {
+			/* private browsing, storage quota, etc. */
+		}
+	}
 
 	function readPersistedListeningHistory() {
 		try {
@@ -642,6 +663,7 @@
 
 		playRequestId += 1;
 		selectedStationName = station.name;
+		persistSelectedStationName(station.name);
 		playbackError = '';
 		shareMessage = '';
 		currentTrack = null;
