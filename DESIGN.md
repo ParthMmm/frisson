@@ -43,20 +43,20 @@ chroma:
 
 Semantic roles are just a step from one of those two scales:
 
-| Token                  | Light points at | Role                                              |
-| ----------------------- | ---------------- | -------------------------------------------------- |
-| `--color-surface`       | `sand-50`        | Card/panel background                              |
-| `--color-canvas`        | `sand-100`       | Page background behind the card                    |
-| `--color-divider`       | `sand-200`       | Hairline borders between sections/rows              |
-| `--color-ink-tertiary`  | `sand-400`       | Tertiary text (timestamps, tags, tuner ticks)       |
-| `--color-ink-secondary` | `sand-600`       | Secondary text (subtitles, "Streaming now")         |
-| `--color-ink`           | `sand-950`       | Primary text, primary button fill                   |
-| `--color-accent`        | `coral-500`      | Live indicator, active state, progress fill, links  |
-| `--color-accent-subtle` | `coral-100`      | Tint background for badges/favorited icons          |
+| Token                   | Light points at | Role                                               |
+| ----------------------- | --------------- | -------------------------------------------------- |
+| `--color-surface`       | `sand-50`       | Card/panel background                              |
+| `--color-canvas`        | `sand-100`      | Page background behind the card                    |
+| `--color-divider`       | `sand-200`      | Hairline borders between sections/rows             |
+| `--color-ink-tertiary`  | `sand-400`      | Tertiary text (timestamps, tags, tuner ticks)      |
+| `--color-ink-secondary` | `sand-600`      | Secondary text (subtitles, "Streaming now")        |
+| `--color-ink`           | `sand-950`      | Primary text, primary button fill                  |
+| `--color-accent`        | `coral-500`     | Live indicator, active state, progress fill, links |
+| `--color-accent-subtle` | `coral-100`     | Tint background for badges/favorited icons         |
 
 **Dark mode doesn't hand-pick new colors.** `:root[data-theme='dark']` in
-`layout.css` re-points the *same* roles at *different steps of the same two
-scales* (e.g. `--color-surface: var(--color-sand-900)` instead of
+`layout.css` re-points the _same_ roles at _different steps of the same two
+scales_ (e.g. `--color-surface: var(--color-sand-900)` instead of
 `sand-50`). If you're ever tempted to write a fresh `oklch(...)` value for a
 dark-mode override, stop — pick an existing sand/coral step instead, or add
 one to the scale if none fits.
@@ -81,7 +81,7 @@ color scales: name the value once, reuse the name.
 ## Shared class strings, not CSS classes
 
 Two buttons or more repeating the same handful of utilities is normal and
-doesn't need a class. When a combination is used across the *whole app*
+doesn't need a class. When a combination is used across the _whole app_
 (press feedback, focus ring, touch hit-area), it becomes a plain string
 constant in `+page.svelte`'s `<script>`, interpolated into `class=""`:
 
@@ -90,7 +90,7 @@ constant in `+page.svelte`'s `<script>`, interpolated into `class=""`:
   and `prefers-reduced-motion` handling. Put this on every interactive
   `<button>` and on rows that act like one:
   `class="{pressable} flex h-14 ..."`.
-- **`iconHit`** — for round icon-only buttons. Keeps the *visible* circle
+- **`iconHit`** — for round icon-only buttons. Keeps the _visible_ circle
   small (matches the reference design, e.g. `size-9`, `size-8`) but pads the
   actual hit target out to ~44px via a `before:` pseudo-element utility, so
   touch targets are comfortable without changing how the control looks.

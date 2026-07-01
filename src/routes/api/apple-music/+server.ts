@@ -38,7 +38,7 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 		country: 'US',
 		media: 'music',
 		entity: 'song',
-		limit: '5'
+		limit: '5',
 	}).toString();
 
 	const response = await fetch(searchUrl);
@@ -53,7 +53,7 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 			(result) =>
 				normalizeTrackText(result.trackName) === normalizedTitle &&
 				normalizeTrackText(result.artistName) === normalizedArtist &&
-				result.trackViewUrl
+				result.trackViewUrl,
 		) ?? results.find((result) => result.trackViewUrl);
 
 	const resultUrl = match?.trackViewUrl ?? null;

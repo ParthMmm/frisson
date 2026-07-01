@@ -4,7 +4,6 @@ import { isAbortError } from '$lib/errors';
 import type { CurrentTrack } from '$lib/api';
 import type { RequestHandler } from './$types';
 
-
 type LiveTrackMetadata = {
 	title: string;
 	artist: string;
@@ -79,13 +78,13 @@ export const GET: RequestHandler = async ({ fetch, request, url }) => {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/json',
-			'x-token': RADIO_FRANCE_TOKEN
+			'x-token': RADIO_FRANCE_TOKEN,
 		},
 		body: JSON.stringify({
 			query: CURRENT_TRACK_QUERY,
-			variables: { station }
+			variables: { station },
 		}),
-		signal: request.signal
+		signal: request.signal,
 	});
 
 	if (!response.ok) error(502, `Radio France metadata returned HTTP ${response.status}`);
@@ -98,7 +97,12 @@ export const GET: RequestHandler = async ({ fetch, request, url }) => {
 
 	const graphTitle = String(song.track.title ?? '').trim();
 	const graphArtist = song.track.mainArtists?.join(', ') || 'Unknown artist';
-	const liveTrack = await loadCurrentLiveMetadata(fetch, stationName, stationNumber, request.signal);
+	const liveTrack = await loadCurrentLiveMetadata(
+		fetch,
+		stationName,
+		stationNumber,
+		request.signal,
+	);
 	const liveTrackMatchesGraph =
 		liveTrack !== null &&
 		normalizeTrackText(liveTrack.title) === normalizeTrackText(graphTitle) &&
@@ -113,7 +117,7 @@ export const GET: RequestHandler = async ({ fetch, request, url }) => {
 		year: shouldUseGraphDetails ? (song.track.productionDate ?? null) : null,
 		artworkUrl: liveTrack?.artworkUrl ?? null,
 		start: liveTrack?.start ?? song.start ?? 0,
-		end: liveTrack?.end ?? song.end ?? 0
+		end: liveTrack?.end ?? song.end ?? 0,
 	} satisfies CurrentTrack);
 };
 
@@ -121,13 +125,13 @@ async function loadCurrentLiveMetadata(
 	fetch: typeof globalThis.fetch,
 	stationName: string,
 	stationNumber: string,
-	signal: AbortSignal
+	signal: AbortSignal,
 ): Promise<LiveTrackMetadata | null> {
 	try {
 		const stationFormat = stationName === 'FIP' ? 'webrf_fip_player' : 'webrf_webradio_player';
 		const response = await fetch(
 			`${RADIO_FRANCE_LIVEMETA_ENDPOINT}/${stationNumber}/${stationFormat}`,
-			{ signal }
+			{ signal },
 		);
 
 		if (!response.ok) return null;
@@ -146,11 +150,10 @@ async function loadCurrentLiveMetadata(
 			artist,
 			artworkUrl: `https://www.radiofrance.fr/pikapi/images/${cover}/200x200`,
 			start: typeof now?.startTime === 'number' ? now.startTime : null,
-			end: typeof now?.endTime === 'number' ? now.endTime : null
+			end: typeof now?.endTime === 'number' ? now.endTime : null,
 		};
 	} catch (error) {
 		if (isAbortError(error)) throw error;
 		return null;
 	}
 }
-
