@@ -71,6 +71,52 @@
 	transition: none !important;
 }
 
+@property --history-scroll-mask-top {
+	syntax: '<length-percentage>';
+	inherits: false;
+	initial-value: 100%;
+}
+
+@property --history-scroll-mask-bottom {
+	syntax: '<length-percentage>';
+	inherits: false;
+	initial-value: 100%;
+}
+
+@keyframes history-scroll-mask {
+	0% {
+		--history-scroll-mask-top: 100%;
+	}
+
+	10%,
+	100% {
+		--history-scroll-mask-top: 85%;
+	}
+
+	0%,
+	90% {
+		--history-scroll-mask-bottom: 85%;
+	}
+
+	100% {
+		--history-scroll-mask-bottom: 100%;
+	}
+}
+
+@media (width >= 64rem) {
+	@supports (animation-timeline: scroll()) {
+		.history-scroll-mask {
+			mask-image:
+				linear-gradient(to top, black, black var(--history-scroll-mask-top), transparent),
+				linear-gradient(to bottom, black, black var(--history-scroll-mask-bottom), transparent);
+			mask-composite: intersect;
+			-webkit-mask-composite: source-in;
+			animation: history-scroll-mask linear;
+			animation-timeline: scroll(self block);
+		}
+	}
+}
+
 .fip-info-dialog::backdrop {
 	background-color: color-mix(in oklch, var(--color-sand-950) 30%, transparent);
 	backdrop-filter: blur(2px);

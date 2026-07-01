@@ -33,7 +33,6 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 		error(400, 'Title or artist is too long');
 	}
 
-
 	const cacheKey = `${normalizeTrackText(title)}|${normalizeTrackText(artist)}`;
 	const cached = readCachedLookup(cacheKey);
 	if (cached) return json({ url: cached.url } satisfies AppleMusicLookupResponse);

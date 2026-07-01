@@ -7,6 +7,7 @@
 	import { fade, fly } from 'svelte/transition';
 	import { normalizeTrackText } from '$lib/text';
 	import { isAbortError } from '$lib/errors';
+	import { getCurrentTrackCacheExpiresAt, getMetadataRefreshDelay } from '$lib/metadata-refresh';
 	import type { AppleMusicLookupResponse, CurrentTrack } from '$lib/api';
 	import Tuner from '$lib/Tuner.svelte';
 	import TrackSummary from '$lib/TrackSummary.svelte';
@@ -43,10 +44,8 @@
 	type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 	type MetadataState = 'idle' | 'loading' | 'ready' | 'error';
 
-	const METADATA_FALLBACK_CACHE_MS = 30_000;
-	const METADATA_REFRESH_GRACE_MS = 1_000;
 	const METADATA_SAFETY_POLL_MS = 120_000;
-	const LISTENING_HISTORY_LIMIT = 8;
+	const LISTENING_HISTORY_LIMIT = 30;
 	const LISTENING_HISTORY_STORAGE_KEY = 'frisson-listening-history-v1';
 	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
 	const FAVORITE_STATIONS_STORAGE_KEY = 'frisson-favorite-stations-v1';
@@ -58,6 +57,10 @@
 	const historyTimeFormatter = new Intl.DateTimeFormat(undefined, {
 		hour: '2-digit',
 		minute: '2-digit'
+	});
+	const historyDateFormatter = new Intl.DateTimeFormat(undefined, {
+		month: 'numeric',
+		day: 'numeric'
 	});
 	const currentTrackCache = new Map<string, CachedCurrentTrack>();
 	const appleMusicUrlCache = new Map<string, string | null>();
@@ -535,9 +538,7 @@
 
 	function cacheCurrentTrack(station: Station, track: CurrentTrack | null) {
 		const now = Date.now();
-		const trackEnd = track?.end ? track.end * 1000 : 0;
-		const expiresAt = trackEnd > now ? trackEnd + 1_000 : now + METADATA_FALLBACK_CACHE_MS;
-
+		const expiresAt = getCurrentTrackCacheExpiresAt(now, track?.end);
 		currentTrackCache.set(station.apiStation, { track, expiresAt });
 	}
 
@@ -551,11 +552,7 @@
 	function scheduleNextMetadataRefresh(station: Station, track: CurrentTrack | null) {
 		clearNextMetadataRefresh();
 
-		const now = Date.now();
-		const trackEnd = track?.end ? track.end * 1000 : 0;
-		const delay =
-			trackEnd > now ? trackEnd - now + METADATA_REFRESH_GRACE_MS : METADATA_FALLBACK_CACHE_MS;
-
+		const delay = getMetadataRefreshDelay(Date.now(), track?.end);
 		metadataRefreshTimeout = window.setTimeout(() => {
 			metadataRefreshTimeout = null;
 			if (station.apiStation !== selectedStation.apiStation) return;
@@ -691,8 +688,19 @@
 		);
 	}
 
-	function formatHistoryTime(timestamp: number) {
-		return historyTimeFormatter.format(timestamp);
+	function formatHistoryTimestamp(timestamp: number) {
+		const listenedAt = new Date(timestamp);
+		const now = new Date();
+		const time = historyTimeFormatter.format(listenedAt);
+		if (
+			listenedAt.getFullYear() === now.getFullYear() &&
+			listenedAt.getMonth() === now.getMonth() &&
+			listenedAt.getDate() === now.getDate()
+		) {
+			return time;
+		}
+
+		return `${historyDateFormatter.format(listenedAt)} · ${time}`;
 	}
 
 	async function loadCurrentTrack(station: Station) {
@@ -705,7 +713,7 @@
 
 		const controller = new AbortController();
 		currentTrackRequest = controller;
-		metadataState = 'loading';
+		if (!currentTrack) metadataState = 'loading';
 
 		try {
 			const params = new URLSearchParams({
@@ -1035,7 +1043,7 @@
 			<TrackSummary
 				rowClass="mt-8 flex items-center gap-4"
 				title={currentTrack?.title ?? selectedStation.name}
-				artist={metadataState === 'loading'
+				artist={metadataState === 'loading' && currentTrack === null
 					? 'Loading current track'
 					: metadataState === 'error'
 						? 'Track data unavailable'
@@ -1213,7 +1221,7 @@
 
 				{#if $listeningHistory.length}
 					<ol
-						class="mt-4 space-y-2 pr-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain"
+						class="history-scroll-mask mt-4 space-y-2 pr-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain"
 						aria-label="Tracks listened to in this session"
 						aria-live="polite"
 						aria-relevant="additions"
@@ -1244,7 +1252,7 @@
 										artworkSize="md"
 										title={item.title}
 										artist={item.artist}
-										meta={`${formatHistoryTime(item.listenedAt)} · ${item.stationName}`}
+										meta={`${formatHistoryTimestamp(item.listenedAt)} · ${item.stationName}`}
 										artworkUrl={item.artworkUrl}
 										artworkAlt={`Artwork for ${item.title} by ${item.artist}`}
 										fallbackAriaLabel={`Live badge for ${item.stationName}`}
