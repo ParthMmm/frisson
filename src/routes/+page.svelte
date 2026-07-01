@@ -899,7 +899,7 @@
 	</div>
 </dialog>
 
-<div class="min-h-screen bg-surface lg:h-screen lg:overflow-hidden">
+<main class="min-h-screen bg-surface lg:h-screen lg:overflow-hidden">
 	<div class="grid min-h-screen w-full grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[1.2fr_1fr] lg:overflow-hidden">
 		<!-- Left: player -->
 		<section class="border-b border-divider p-6 sm:p-8 lg:overflow-hidden lg:border-r lg:border-b-0 lg:p-14">
@@ -1279,5 +1279,5 @@
 			</section>
 		</section>
 	</div>
-</div>
+</main>
 
