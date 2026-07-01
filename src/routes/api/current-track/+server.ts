@@ -1,16 +1,8 @@
 import { error, json } from '@sveltejs/kit';
-import { normalizeTrackText } from '$lib/text';
 import { isAbortError } from '$lib/errors';
+import { buildCurrentTrack, type LiveTrackMetadata } from '$lib/current-track';
 import type { CurrentTrack } from '$lib/api';
 import type { RequestHandler } from './$types';
-
-type LiveTrackMetadata = {
-	title: string;
-	artist: string;
-	artworkUrl: string;
-	start: number | null;
-	end: number | null;
-};
 
 type RadioFranceTrack = {
 	title?: string;
@@ -123,22 +115,21 @@ export const GET: RequestHandler = async ({ fetch, request, url, platform }) => 
 		stationNumber,
 		request.signal,
 	);
-	const liveTrackMatchesGraph =
-		liveTrack !== null &&
-		normalizeTrackText(liveTrack.title) === normalizeTrackText(graphTitle) &&
-		normalizeTrackText(liveTrack.artist) === normalizeTrackText(graphArtist);
-	const shouldUseGraphDetails = liveTrack === null || liveTrackMatchesGraph;
-
-	return json({
-		id: song.id ?? `${station}:${song.start ?? 0}`,
-		title: liveTrack?.title ?? graphTitle,
-		artist: liveTrack?.artist ?? graphArtist,
-		album: shouldUseGraphDetails ? song.track.albumTitle || 'Single' : 'Single',
-		year: shouldUseGraphDetails ? (song.track.productionDate ?? null) : null,
-		artworkUrl: liveTrack?.artworkUrl ?? null,
-		start: liveTrack?.start ?? song.start ?? 0,
-		end: liveTrack?.end ?? song.end ?? 0,
-	} satisfies CurrentTrack);
+	return json(
+		buildCurrentTrack(
+			station,
+			{
+				id: song.id,
+				title: graphTitle,
+				artist: graphArtist,
+				album: song.track.albumTitle,
+				year: song.track.productionDate,
+				start: song.start,
+				end: song.end,
+			},
+			liveTrack,
+		),
+	);
 };
 
 async function loadCurrentLiveMetadata(
@@ -159,13 +150,16 @@ async function loadCurrentLiveMetadata(
 		const metadata = (await response.json()) as LiveMetadataResponse;
 		const now = metadata.now;
 		const cover = now?.cover;
-		const songUuid = now?.songUuid;
+		const liveTrackId = now?.songUuid;
 		const title = String(now?.firstLine ?? '').trim();
 		const artist = String(now?.secondLine ?? '').trim();
 
-		if (!cover || !songUuid || !title || !artist) return null;
+		if (typeof cover !== 'string' || typeof liveTrackId !== 'string' || !title || !artist) {
+			return null;
+		}
 
 		return {
+			id: liveTrackId,
 			title,
 			artist,
 			artworkUrl: `https://www.radiofrance.fr/pikapi/images/${cover}/200x200`,

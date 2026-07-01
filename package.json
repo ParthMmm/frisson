@@ -14,7 +14,7 @@
 		"lint:fix": "oxlint --fix",
 		"fmt": "oxfmt",
 		"fmt:check": "oxfmt --check",
-		"test": "bun tests/metadata-refresh.test.ts && bun tests/playback-recovery.test.ts"
+		"test": "bun tests/metadata-refresh.test.ts && bun tests/playback-recovery.test.ts && bun tests/current-track.test.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-cloudflare": "^7.2.9",
