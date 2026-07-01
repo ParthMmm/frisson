@@ -175,6 +175,7 @@
 	let metadataState = $state<MetadataState>('idle');
 	let metadataError = $state('');
 	let isAppleMusicLookupLoading = $state(false);
+	let appleMusicLookupRevision = $state(0);
 	let currentTrackRequest: AbortController | null = null;
 	let currentTrackRequestId = 0;
 	let metadataPoll: number | null = null;
@@ -217,6 +218,10 @@
 					? 'Unavailable'
 					: 'Ready'
 	);
+	const currentTrackAppleMusicMode = $derived.by(() => {
+		void appleMusicLookupRevision;
+		return currentTrack && !hasNoAppleMusicMatch(currentTrack) ? 'button' : 'none';
+	});
 
 	$effect(() => {
 		if (!hasActivePlayback || !currentTrack) return;
@@ -346,10 +351,7 @@
 
 		try {
 			const url = await lookupAppleMusicUrl(currentTrack);
-			if (!url) {
-				shareMessage = 'No Apple Music match found.';
-				return;
-			}
+			if (!url) return;
 
 			const appleMusicWindow = window.open(url, '_blank');
 			if (appleMusicWindow) {
@@ -467,6 +469,13 @@
 		return `${normalizeTrackText(track.title)}:${normalizeTrackText(track.artist)}`;
 	}
 
+	function hasNoAppleMusicMatch(track: Pick<CurrentTrack, 'title' | 'artist'> | null) {
+		if (!track) return false;
+
+		const appleMusicLookupKey = getAppleMusicLookupKey(track);
+		return appleMusicUrlCache.has(appleMusicLookupKey) && appleMusicUrlCache.get(appleMusicLookupKey) === null;
+	}
+
 	function cacheAppleMusicUrl(key: string, url: string | null) {
 		if (!appleMusicUrlCache.has(key) && appleMusicUrlCache.size >= APPLE_MUSIC_URL_CACHE_LIMIT) {
 			const oldestKey = appleMusicUrlCache.keys().next().value;
@@ -474,6 +483,7 @@
 		}
 
 		appleMusicUrlCache.set(key, url);
+		appleMusicLookupRevision += 1;
 	}
 
 	async function lookupAppleMusicUrl(track: Pick<CurrentTrack, 'title' | 'artist'>) {
@@ -828,7 +838,7 @@
 					? `Artwork for ${currentTrack.title} by ${currentTrack.artist}`
 					: `Live badge for ${selectedStation.name}`}
 				fallbackAriaLabel={`Live badge for ${selectedStation.name}`}
-				appleMusicMode={currentTrack ? 'button' : 'none'}
+				appleMusicMode={currentTrackAppleMusicMode}
 				appleMusicLoading={isAppleMusicLookupLoading}
 				appleMusicTitle="Open in Apple Music"
 				appleMusicAriaLabel="Open current track in Apple Music"
@@ -1031,7 +1041,6 @@
 										appleMusicMode="link"
 										appleMusicHref={item.appleMusicUrl}
 										appleMusicLoading={item.isAppleMusicLookupLoading}
-										appleMusicUnavailableLabel="No match"
 										badgeLabel={index === 0 ? 'Latest' : ''}
 										titleFirst
 										{pressable}
