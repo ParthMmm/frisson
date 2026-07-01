@@ -20,6 +20,8 @@ type CachedAppleMusicLookup = {
 
 const LOOKUP_CACHE_TTL_MS = 10 * 60_000;
 const LOOKUP_CACHE_LIMIT = 128;
+const MAX_QUERY_LENGTH = 200;
+
 const lookupCache = new Map<string, CachedAppleMusicLookup>();
 
 export const GET: RequestHandler = async ({ fetch, url }) => {
@@ -27,6 +29,10 @@ export const GET: RequestHandler = async ({ fetch, url }) => {
 	const artist = url.searchParams.get('artist')?.trim();
 
 	if (!title || !artist) error(400, 'Missing title or artist');
+	if (title.length > MAX_QUERY_LENGTH || artist.length > MAX_QUERY_LENGTH) {
+		error(400, 'Title or artist is too long');
+	}
+
 
 	const cacheKey = `${normalizeTrackText(title)}|${normalizeTrackText(artist)}`;
 	const cached = readCachedLookup(cacheKey);

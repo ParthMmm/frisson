@@ -47,7 +47,6 @@ type LiveMetadataResponse = {
 };
 
 const RADIO_FRANCE_GRAPHQL_ENDPOINT = 'https://openapi.radiofrance.fr/v1/graphql';
-const RADIO_FRANCE_TOKEN = 'b0b8d190-44b8-449f-b3fc-62cf10d3c461';
 const RADIO_FRANCE_LIVEMETA_ENDPOINT = 'https://api.radiofrance.fr/livemeta/live';
 const CURRENT_TRACK_QUERY = `
 	query CurrentTrack($station: StationsEnum!) {
@@ -67,18 +66,39 @@ const CURRENT_TRACK_QUERY = `
 	}
 `;
 
-export const GET: RequestHandler = async ({ fetch, request, url }) => {
+const KNOWN_STATIONS: Record<string, { number: string; name: string }> = {
+	FIP: { number: '7', name: 'FIP' },
+	FIP_ROCK: { number: '64', name: 'FIP Rock' },
+	FIP_JAZZ: { number: '65', name: 'FIP Jazz' },
+	FIP_GROOVE: { number: '66', name: 'FIP Groove' },
+	FIP_WORLD: { number: '69', name: 'FIP Monde' },
+	FIP_NOUVEAUTES: { number: '70', name: 'FIP Nouveautés' },
+	FIP_REGGAE: { number: '71', name: 'FIP Reggae' },
+	FIP_ELECTRO: { number: '74', name: 'FIP Electro' },
+	FIP_METAL: { number: '77', name: 'FIP Metal' },
+	FIP_POP: { number: '78', name: 'FIP Pop' },
+	FIP_HIP_HOP: { number: '95', name: 'FIP Hip-Hop' },
+};
+
+export const GET: RequestHandler = async ({ fetch, request, url, platform }) => {
 	const station = url.searchParams.get('station')?.trim();
 	const stationNumber = url.searchParams.get('number')?.trim();
 	const stationName = url.searchParams.get('name')?.trim();
 
 	if (!station || !stationNumber || !stationName) error(400, 'Missing station metadata');
+	const token = platform?.env.RADIO_FRANCE_TOKEN;
+	if (!token) error(500, 'Radio France API token is not configured');
+
+	const knownStation = KNOWN_STATIONS[station];
+	if (!knownStation || knownStation.number !== stationNumber || knownStation.name !== stationName) {
+		error(400, 'Unknown station');
+	}
 
 	const response = await fetch(RADIO_FRANCE_GRAPHQL_ENDPOINT, {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/json',
-			'x-token': RADIO_FRANCE_TOKEN,
+			'x-token': token,
 		},
 		body: JSON.stringify({
 			query: CURRENT_TRACK_QUERY,
