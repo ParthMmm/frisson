@@ -47,7 +47,10 @@
 	const METADATA_REFRESH_GRACE_MS = 1_000;
 	const METADATA_SAFETY_POLL_MS = 120_000;
 	const LISTENING_HISTORY_LIMIT = 8;
-	const LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
+	const LISTENING_HISTORY_STORAGE_KEY = 'frisson-listening-history-v1';
+	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
+	const THEME_STORAGE_KEY = 'frisson-theme';
+	const LEGACY_THEME_STORAGE_KEY = 'fip-theme';
 	const APPLE_MUSIC_URL_CACHE_LIMIT = 128;
 	const historyTimeFormatter = new Intl.DateTimeFormat(undefined, {
 		hour: '2-digit',
@@ -241,7 +244,9 @@
 
 	function readPersistedListeningHistory() {
 		try {
-			const stored = localStorage.getItem(LISTENING_HISTORY_STORAGE_KEY);
+			const stored =
+				localStorage.getItem(LISTENING_HISTORY_STORAGE_KEY) ??
+				localStorage.getItem(LEGACY_LISTENING_HISTORY_STORAGE_KEY);
 			if (!stored) return [];
 
 			const parsed: unknown = JSON.parse(stored);
@@ -260,10 +265,12 @@
 		try {
 			if (items.length === 0) {
 				localStorage.removeItem(LISTENING_HISTORY_STORAGE_KEY);
+				localStorage.removeItem(LEGACY_LISTENING_HISTORY_STORAGE_KEY);
 				return;
 			}
 
 			localStorage.setItem(LISTENING_HISTORY_STORAGE_KEY, JSON.stringify(items));
+			localStorage.removeItem(LEGACY_LISTENING_HISTORY_STORAGE_KEY);
 		} catch {
 			/* private browsing, storage quota, etc. */
 		}
@@ -295,7 +302,8 @@
 		theme = theme === 'dark' ? 'light' : 'dark';
 		html.dataset.theme = theme;
 		try {
-			localStorage.setItem('fip-theme', theme);
+			localStorage.setItem(THEME_STORAGE_KEY, theme);
+			localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
 		} catch {
 			/* private browsing, etc. */
 		}
@@ -308,7 +316,7 @@
 
 		const shareData = {
 			title: selectedStation.name,
-			text: `Listen to ${selectedStation.name} on FIP.`,
+			text: `Listen to ${selectedStation.name} on Frisson.`,
 			url: selectedStation.streamUrl
 		};
 
@@ -654,10 +662,10 @@
 </script>
 
 <svelte:head>
-	<title>{selectedStation.name} · FIP Player</title>
+	<title>{selectedStation.name} · Frisson</title>
 	<meta
 		name="description"
-		content="A focused Svelte player for FIP and Radio France web radio stations."
+		content="Frisson is a focused Svelte player for FIP and Radio France web radio stations."
 	/>
 </svelte:head>
 
@@ -688,7 +696,7 @@
 			<!-- Top bar -->
 			<div class="flex items-start justify-between">
 				<div class="text-2xl font-extrabold tracking-tight text-ink">
-					fip<span class="text-accent">.</span>
+					Frisson<span class="text-accent">.</span>
 				</div>
 				<div class="flex items-center gap-3">
 					<button

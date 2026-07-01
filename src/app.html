@@ -7,7 +7,7 @@
 		<script>
 			// Set theme before first paint to avoid a flash of the wrong theme.
 			try {
-				const stored = localStorage.getItem('fip-theme');
+				const stored = localStorage.getItem('frisson-theme') ?? localStorage.getItem('fip-theme');
 				const theme =
 					stored ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 				document.documentElement.dataset.theme = theme;
