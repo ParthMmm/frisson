@@ -14,6 +14,10 @@
 		type MetadataState
 	} from '$lib/metadata-refresh';
 	import type { AppleMusicLookupResponse, CurrentTrack } from '$lib/api';
+	import {
+		createPlaybackRecovery,
+		type PlaybackRecoveryController
+	} from '$lib/playback-recovery';
 	import Tuner from '$lib/Tuner.svelte';
 	import TrackSummary from '$lib/TrackSummary.svelte';
 
@@ -193,6 +197,8 @@
 	let metadataPoll: number | null = null;
 	let metadataRefreshTimeout: number | null = null;
 	let playRequestId = 0;
+	let isPlaybackRecoveryPending = $state(false);
+	let playbackRecovery: PlaybackRecoveryController | null = null;
 
 	// Shared Tailwind class strings instead of custom CSS classes — one
 	// definition, applied wherever a button needs it, no `@layer components`.
@@ -216,6 +222,11 @@
 	const fipInfoMotion = new Tween(0, {
 		duration: () => (prefersReducedMotion.current ? 0 : 220),
 		easing: quintOut
+	});
+
+	const reconnectSweep = new Tween(0, {
+		duration: () => (prefersReducedMotion.current ? 0 : 1150),
+		easing: linear
 	});
 
 	let historyArrivalPulse = 0;
@@ -256,12 +267,23 @@
 		playbackState === 'playing'
 			? 'On air'
 			: playbackState === 'loading'
-				? 'Buffering'
+				? isPlaybackRecoveryPending
+					? 'Reconnecting'
+					: 'Buffering'
 				: playbackState === 'error'
 					? 'Unavailable'
 					: playbackState === 'paused'
 						? 'Paused'
 						: '' // idle: nothing to report before the first play
+	);
+	const playbackButtonLabel = $derived(
+		isPlaybackRecoveryPending
+			? 'Stop retrying stream'
+			: isLoading
+				? 'Cancel buffering'
+				: isPlaying
+					? 'Pause stream'
+					: 'Play stream'
 	);
 	const currentTrackAppleMusicMode = $derived.by(() => {
 		void appleMusicLookupRevision;
@@ -321,6 +343,33 @@
 		};
 	});
 
+	$effect(() => {
+		if (!isPlaybackRecoveryPending || prefersReducedMotion.current) {
+			void reconnectSweep.set(0, { duration: 0 });
+			return;
+		}
+
+		let cancelled = false;
+
+		async function sweepReconnectIndicator() {
+			while (!cancelled) {
+				await reconnectSweep.set(0, { duration: 0 });
+				if (cancelled) return;
+
+				await reconnectSweep.set(1, {
+					duration: 1150,
+					easing: linear
+				});
+			}
+		}
+
+		void sweepReconnectIndicator();
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
 	onMount(() => {
 		// app.html already set this pre-paint; just mirror it into state.
 		theme = (document.documentElement.dataset.theme as 'light' | 'dark') ?? 'light';
@@ -328,6 +377,14 @@
 		selectedStationName = readPersistedSelectedStationName() ?? selectedStationName;
 		listeningHistory.set(readPersistedListeningHistory());
 		const unsubscribeListeningHistory = listeningHistory.subscribe(persistListeningHistory);
+		playbackRecovery = createPlaybackRecovery({
+			audio: () => audioElement,
+			isPlaybackExpected: () => hasActivePlayback,
+			recover: () => play({ reload: true }),
+			onRecoveryPendingChange: (pending) => {
+				isPlaybackRecoveryPending = pending;
+			},
+		});
 		void loadCurrentTrack(selectedStation);
 		metadataPoll = window.setInterval(() => {
 			void loadCurrentTrack(selectedStation);
@@ -335,6 +392,7 @@
 
 		return () => {
 			unsubscribeListeningHistory();
+			playbackRecovery?.dispose();
 			if (metadataPoll !== null) window.clearInterval(metadataPoll);
 			clearNextMetadataRefresh();
 			currentTrackRequest?.abort();
@@ -814,13 +872,14 @@
 		audioElement.volume = volume / 100;
 	}
 
-	async function play() {
+	async function play({ reload = false }: { reload?: boolean } = {}) {
 		if (!audioElement) return;
 
 		const requestId = ++playRequestId;
 		playbackState = 'loading';
 		playbackError = '';
 		applyVolume();
+		if (reload) audioElement.load();
 
 		try {
 			await audioElement.play();
@@ -830,13 +889,22 @@
 
 			playbackState = 'error';
 			playbackError = 'Playback was blocked or the stream is unavailable.';
+			playbackRecovery?.notePlaybackStopped();
 		}
+	}
+
+	function notePlaybackInterrupted() {
+		if (!hasActivePlayback) return;
+
+		playbackState = 'loading';
+		playbackRecovery?.notePlaybackInterrupted();
 	}
 
 	function pause() {
 		playRequestId += 1;
 		audioElement?.pause();
 		playbackState = 'paused';
+		playbackRecovery?.notePlaybackStopped();
 	}
 
 	function togglePlayback() {
@@ -855,6 +923,7 @@
 		}
 
 		playRequestId += 1;
+		playbackRecovery?.notePlaybackStopped();
 		selectedStationName = station.name;
 		persistSelectedStationName(station.name);
 		playbackError = '';
@@ -865,8 +934,7 @@
 		playbackState = 'loading';
 
 		await tick();
-		audioElement?.load();
-		await play();
+		await play({ reload: true });
 	}
 
 	function selectAdjacentStation(direction: -1 | 1) {
@@ -904,16 +972,18 @@
 	onplaying={() => {
 		playbackState = 'playing';
 		playbackError = '';
+		playbackRecovery?.notePlaybackHealthy();
 	}}
-	onwaiting={() => {
-		if (playbackState !== 'paused') playbackState = 'loading';
-	}}
+	onwaiting={notePlaybackInterrupted}
+	onstalled={notePlaybackInterrupted}
 	onpause={() => {
 		if (playbackState !== 'error') playbackState = 'paused';
+		playbackRecovery?.notePlaybackStopped();
 	}}
 	onerror={() => {
 		playbackState = 'error';
 		playbackError = 'The selected FIP stream could not be loaded.';
+		playbackRecovery?.notePlaybackStopped();
 	}}
 ></audio>
 
@@ -1025,9 +1095,21 @@
 						></span>
 						<span class="relative size-1.5 rounded-full" style:background-color={stationDotColor}></span>
 					</span>
-					{#key selectedStation.name}
-						<span transition:fade={{ duration: prefersReducedMotion.current ? 0 : 140 }}>{selectedStation.name}</span>
-					{/key}
+					<span class="relative grid min-w-0" role="status" aria-live="polite">
+						{#each stations as station (station.name)}
+							<span class="invisible col-start-1 row-start-1 whitespace-nowrap" aria-hidden="true">
+								{station.name}
+							</span>
+						{/each}
+						{#key selectedStation.name}
+							<span
+								class="col-start-1 row-start-1 whitespace-nowrap"
+								transition:fade={{ duration: prefersReducedMotion.current ? 0 : 140 }}
+							>
+								{selectedStation.name}
+							</span>
+						{/key}
+					</span>
 				</div>
 				<div class="flex items-center gap-3">
 					<button
@@ -1075,12 +1157,23 @@
 					>
 				{/key}
 			</h1>
-			<p class="mt-3 text-ink-secondary">
-				Radio France · webradio
+			<p class="mt-3 flex items-center gap-2 text-ink-secondary">
+				<span>Radio France · webradio</span>
 				{#if statusLabel}
 					<span class="text-ink-tertiary">—</span>
-					<span class="font-medium text-accent" role="status" aria-live="polite">{statusLabel}</span
+					<span
+						class="inline-flex items-center gap-1.5 font-medium text-accent"
+						role="status"
+						aria-live="polite"
 					>
+						{#if isLoading}
+							<span
+								class="size-1.5 rounded-full bg-current {isPlaybackRecoveryPending ? 'animate-pulse motion-reduce:animate-none' : ''}"
+								aria-hidden="true"
+							></span>
+						{/if}
+						{statusLabel}
+					</span>
 				{/if}
 			</p>
 			{#if playbackError}
@@ -1127,16 +1220,23 @@
 			/>
 
 			<div class="mt-4">
-				<div class="h-1 overflow-hidden rounded-full bg-divider">
+				<div class="relative h-1 overflow-hidden rounded-full bg-divider">
 					<div
 						class="h-full origin-left rounded-full bg-accent will-change-transform"
 						style:transform={`scaleX(${prefersReducedMotion.current ? playbackProgress : playbackProgressMotion.current})`}
 					></div>
+					{#if isPlaybackRecoveryPending}
+						<div
+							class="pointer-events-none absolute inset-y-0 left-0 w-1/3 rounded-full bg-gradient-to-r from-transparent via-accent/70 to-transparent will-change-transform motion-reduce:hidden"
+							style:transform={`translateX(${-140 + reconnectSweep.current * 560}%)`}
+							aria-hidden="true"
+						></div>
+					{/if}
 				</div>
 				<div class="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center text-xs tabular-nums text-ink-tertiary">
 					<span>Live</span>
 					<span class="text-center">{currentTrackTimeLabel}</span>
-					<span class="text-right">{isLoading ? 'Buffering' : isPlaying ? '∞' : 'Paused'}</span>
+					<span class="text-right">{isPlaybackRecoveryPending ? 'Retrying stream…' : isLoading ? 'Buffering' : isPlaying ? '∞' : 'Paused'}</span>
 				</div>
 			</div>
 
@@ -1155,21 +1255,24 @@
 				</button>
 				<button
 					type="button"
+					aria-label={playbackButtonLabel}
 					aria-pressed={hasActivePlayback}
-					class="{pressable} flex h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-ink font-semibold text-surface hover:bg-ink/90"
+					class="{pressable} flex h-14 flex-1 items-center justify-center rounded-2xl {isPlaybackRecoveryPending ? 'bg-accent text-surface hover:bg-accent/90' : 'bg-ink text-surface hover:bg-ink/90'}"
 					onclick={togglePlayback}
 				>
-					{#if hasActivePlayback}
+					{#if isLoading}
+						<svg viewBox="0 0 24 24" class="size-4" fill="currentColor" aria-hidden="true">
+							<rect x="7" y="7" width="10" height="10" rx="1.5" />
+						</svg>
+					{:else if isPlaying}
 						<svg viewBox="0 0 24 24" class="size-4" fill="currentColor" aria-hidden="true">
 							<rect x="6" y="4" width="4" height="16" rx="1" />
 							<rect x="14" y="4" width="4" height="16" rx="1" />
 						</svg>
-						{isLoading ? 'Cancel' : 'Pause'}
 					{:else}
 						<svg viewBox="0 0 24 24" class="size-4" fill="currentColor" aria-hidden="true">
 							<path d="M7 4l13 8-13 8V4z" />
 						</svg>
-						Play
 					{/if}
 				</button>
 				<button
