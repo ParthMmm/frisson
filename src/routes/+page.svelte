@@ -7,7 +7,12 @@
 	import { fade, fly } from 'svelte/transition';
 	import { normalizeTrackText } from '$lib/text';
 	import { isAbortError } from '$lib/errors';
-	import { getCurrentTrackCacheExpiresAt, getMetadataRefreshDelay } from '$lib/metadata-refresh';
+	import {
+		getCurrentTrackCacheExpiresAt,
+		getMetadataFailureState,
+		getMetadataRefreshDelay,
+		type MetadataState
+	} from '$lib/metadata-refresh';
 	import type { AppleMusicLookupResponse, CurrentTrack } from '$lib/api';
 	import Tuner from '$lib/Tuner.svelte';
 	import TrackSummary from '$lib/TrackSummary.svelte';
@@ -42,7 +47,6 @@
 	type CurrentTrackResponse = CurrentTrack | null;
 
 	type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
-	type MetadataState = 'idle' | 'loading' | 'ready' | 'error';
 
 	const METADATA_SAFETY_POLL_MS = 120_000;
 	const LISTENING_HISTORY_LIMIT = 30;
@@ -736,8 +740,8 @@
 			if (isAbortError(error)) return;
 			if (controller.signal.aborted || !isCurrentTrackRequest(station, requestId)) return;
 
-			metadataState = 'error';
-			scheduleNextMetadataRefresh(station, null);
+			metadataState = getMetadataFailureState(currentTrack !== null);
+			scheduleNextMetadataRefresh(station, currentTrack);
 		} finally {
 			if (currentTrackRequest === controller) currentTrackRequest = null;
 		}
@@ -1045,7 +1049,7 @@
 				title={currentTrack?.title ?? selectedStation.name}
 				artist={metadataState === 'loading' && currentTrack === null
 					? 'Loading current track'
-					: metadataState === 'error'
+					: metadataState === 'error' && currentTrack === null
 						? 'Track data unavailable'
 						: (currentTrack?.artist ?? 'Streaming now')}
 				meta={currentTrack

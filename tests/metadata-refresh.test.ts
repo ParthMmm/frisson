@@ -1,6 +1,8 @@
 import {
 	METADATA_REFRESH_GRACE_MS,
+	METADATA_STALE_RETRY_MS,
 	getCurrentTrackCacheExpiresAt,
+	getMetadataFailureState,
 	getMetadataRefreshDelay,
 } from '../src/lib/metadata-refresh';
 
@@ -38,4 +40,24 @@ assertEqual(
 	getMetadataRefreshDelay(now + 10_000, trackEndSeconds),
 	METADATA_REFRESH_GRACE_MS,
 	'metadata refresh delay waits out the grace window after track end',
+);
+assertEqual(
+	getMetadataRefreshDelay(now + 16_000, trackEndSeconds),
+	METADATA_STALE_RETRY_MS,
+	'stale metadata retries quickly after the grace window',
+);
+assertEqual(
+	getCurrentTrackCacheExpiresAt(now + 16_000, trackEndSeconds, 30_000),
+	now + 16_000 + METADATA_STALE_RETRY_MS,
+	'stale metadata cache expires on the retry cadence',
+);
+assertEqual(
+	getMetadataFailureState(true),
+	'ready',
+	'metadata failure keeps ready state when stale track is visible',
+);
+assertEqual(
+	getMetadataFailureState(false),
+	'error',
+	'metadata failure shows error only without a visible track',
 );
