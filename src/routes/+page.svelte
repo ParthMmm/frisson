@@ -49,6 +49,7 @@
 	const LISTENING_HISTORY_LIMIT = 8;
 	const LISTENING_HISTORY_STORAGE_KEY = 'frisson-listening-history-v1';
 	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
+	const FAVORITE_STATIONS_STORAGE_KEY = 'frisson-favorite-stations-v1';
 	const THEME_STORAGE_KEY = 'frisson-theme';
 	const LEGACY_THEME_STORAGE_KEY = 'fip-theme';
 	const SELECTED_STATION_STORAGE_KEY = 'frisson-selected-station';
@@ -168,6 +169,7 @@
 	let volume = $state(80);
 	let theme = $state<'light' | 'dark'>('light');
 	let audioElement: HTMLAudioElement;
+	let fipInfoDialog: HTMLDialogElement | undefined = $state();
 	let playbackError = $state('');
 	let shareMessage = $state('');
 	let currentTrack = $state<CurrentTrack | null>(null);
@@ -197,6 +199,16 @@
 		easing: quintOut
 	});
 
+	const stationPulse = new Tween(0, {
+		duration: () => (prefersReducedMotion.current ? 0 : 900),
+		easing: cubicOut
+	});
+
+	const fipInfoMotion = new Tween(0, {
+		duration: () => (prefersReducedMotion.current ? 0 : 220),
+		easing: quintOut
+	});
+
 	let historyArrivalPulse = 0;
 
 	const selectedStation = $derived(
@@ -204,7 +216,15 @@
 	);
 	const isPlaying = $derived(playbackState === 'playing');
 	const isLoading = $derived(playbackState === 'loading');
+	const stationPulseScale = $derived(isPlaying ? 1 + stationPulse.current * 2.4 : 1);
+	const stationPulseOpacity = $derived(
+		isPlaying && !prefersReducedMotion.current ? (1 - stationPulse.current) * 0.45 : 0
+	);
+	const stationDotColor = $derived(isLoading ? 'oklch(72% 0.17 70)' : 'var(--color-accent)');
 	const hasActivePlayback = $derived(isPlaying || isLoading);
+	const fipInfoScale = $derived(0.96 + fipInfoMotion.current * 0.04);
+	const fipInfoOffset = $derived((1 - fipInfoMotion.current) * 10);
+	const fipInfoBackdropOpacity = $derived(fipInfoMotion.current);
 	const playbackProgress = $derived(isPlaying ? 1 : isLoading ? 0.35 : 0);
 	const playbackProgressMotion = Tween.of(() => playbackProgress, {
 		duration: () => (prefersReducedMotion.current ? 0 : 300),
@@ -217,7 +237,9 @@
 				? 'Buffering'
 				: playbackState === 'error'
 					? 'Unavailable'
-					: 'Ready'
+					: playbackState === 'paused'
+						? 'Paused'
+						: '' // idle: nothing to report before the first play
 	);
 	const currentTrackAppleMusicMode = $derived.by(() => {
 		void appleMusicLookupRevision;
@@ -229,14 +251,48 @@
 		recordListeningHistory(currentTrack, selectedStation);
 	});
 
+	$effect(() => {
+		if (!isPlaying || prefersReducedMotion.current) {
+			void stationPulse.set(0, { duration: 0 });
+			return;
+		}
+
+		let cancelled = false;
+		let pause: number | null = null;
+
+		async function pulseStationDot() {
+			while (!cancelled) {
+				await stationPulse.set(0, { duration: 0 });
+				if (cancelled) return;
+
+				await stationPulse.set(1, {
+					duration: 900,
+					easing: cubicOut
+				});
+				if (cancelled) return;
+
+				await new Promise<void>((resolve) => {
+					pause = window.setTimeout(resolve, 850);
+				});
+			}
+		}
+
+		void pulseStationDot();
+
+		return () => {
+			cancelled = true;
+			if (pause !== null) window.clearTimeout(pause);
+		};
+	});
+
 	onMount(() => {
 		// app.html already set this pre-paint; just mirror it into state.
 		theme = (document.documentElement.dataset.theme as 'light' | 'dark') ?? 'light';
+		applyPersistedFavoriteStations();
 		selectedStationName = readPersistedSelectedStationName() ?? selectedStationName;
 		listeningHistory.set(readPersistedListeningHistory());
 		const unsubscribeListeningHistory = listeningHistory.subscribe(persistListeningHistory);
 		void loadCurrentTrack(selectedStation);
-
 		metadataPoll = window.setInterval(() => {
 			void loadCurrentTrack(selectedStation);
 		}, METADATA_SAFETY_POLL_MS);
@@ -263,6 +319,42 @@
 	function persistSelectedStationName(name: string) {
 		try {
 			localStorage.setItem(SELECTED_STATION_STORAGE_KEY, name);
+		} catch {
+			/* private browsing, storage quota, etc. */
+		}
+	}
+
+	function applyPersistedFavoriteStations() {
+		try {
+			const stored = localStorage.getItem(FAVORITE_STATIONS_STORAGE_KEY);
+			if (!stored) return;
+
+			const parsed: unknown = JSON.parse(stored);
+			if (!Array.isArray(parsed)) return;
+
+			const favoriteNames = new Set(
+				parsed.filter((name): name is string => typeof name === 'string')
+			);
+			for (const station of stations) {
+				station.favorite = favoriteNames.has(station.name);
+			}
+		} catch {
+			/* private browsing, malformed data, etc. */
+		}
+	}
+
+	function persistFavoriteStations() {
+		try {
+			const favoriteNames = stations
+				.filter((station) => station.favorite)
+				.map((station) => station.name);
+
+			if (favoriteNames.length === 0) {
+				localStorage.removeItem(FAVORITE_STATIONS_STORAGE_KEY);
+				return;
+			}
+
+			localStorage.setItem(FAVORITE_STATIONS_STORAGE_KEY, JSON.stringify(favoriteNames));
 		} catch {
 			/* private browsing, storage quota, etc. */
 		}
@@ -337,6 +429,34 @@
 			requestAnimationFrame(() => html.removeAttribute('data-theme-switching'))
 		);
 	}
+
+	async function openFipInfo() {
+		if (!fipInfoDialog || fipInfoDialog.open) return;
+
+		await fipInfoMotion.set(0, { duration: 0 });
+		fipInfoDialog.showModal();
+		await tick();
+		void fipInfoMotion.set(1);
+	}
+
+	async function closeFipInfo() {
+		if (!fipInfoDialog?.open) return;
+
+		await fipInfoMotion.set(0, {
+			duration: prefersReducedMotion.current ? 0 : 160,
+			easing: quintOut
+		});
+		fipInfoDialog.close();
+	}
+
+	function cancelFipInfoClose(event: Event) {
+		event.preventDefault();
+		void closeFipInfo();
+	}
+
+	function closeFipInfoOnBackdrop(event: MouseEvent) {
+		if (event.target === fipInfoDialog) void closeFipInfo();
+	}
 	async function shareStation() {
 		shareMessage = '';
 
@@ -389,7 +509,7 @@
 		}
 	}
 
-	function readCachedCurrentTrack(station: Station, requestId: number) {
+	function readCachedCurrentTrack(station: Station) {
 		const cached = currentTrackCache.get(station.apiStation);
 		if (!cached) return false;
 
@@ -397,8 +517,6 @@
 			currentTrackCache.delete(station.apiStation);
 			return false;
 		}
-
-		if (!isCurrentTrackRequest(station, requestId)) return true;
 
 		currentTrack = cached.track;
 		metadataState = 'ready';
@@ -502,7 +620,6 @@
 			const oldestKey = appleMusicUrlCache.keys().next().value;
 			if (oldestKey !== undefined) appleMusicUrlCache.delete(oldestKey);
 		}
-
 		appleMusicUrlCache.set(key, url);
 		appleMusicLookupRevision += 1;
 	}
@@ -576,7 +693,7 @@
 		currentTrackRequest?.abort();
 		currentTrackRequest = null;
 
-		if (readCachedCurrentTrack(station, requestId)) return;
+		if (readCachedCurrentTrack(station)) return;
 
 		const controller = new AbortController();
 		currentTrackRequest = controller;
@@ -689,7 +806,10 @@
 
 	function toggleFavorite(name: string) {
 		const station = stations.find((s) => s.name === name);
-		if (station) station.favorite = !station.favorite;
+		if (!station) return;
+
+		station.favorite = !station.favorite;
+		persistFavoriteStations();
 	}
 </script>
 
@@ -721,14 +841,65 @@
 	}}
 ></audio>
 
+<dialog
+	bind:this={fipInfoDialog}
+	aria-labelledby="fip-info-title"
+	class="fip-info-dialog m-auto w-[min(92vw,28rem)] rounded-card border border-divider bg-surface p-0 text-ink shadow-2xl will-change-[opacity,transform]"
+	style:--fip-info-backdrop-opacity={fipInfoBackdropOpacity}
+	style:opacity={fipInfoMotion.current}
+	style:transform={`translateY(${fipInfoOffset}px) scale(${fipInfoScale})`}
+	oncancel={cancelFipInfoClose}
+	onclick={closeFipInfoOnBackdrop}
+>
+	<div class="p-6 sm:p-7">
+		<div class="flex items-start justify-between gap-4">
+			<div>
+				<p class="text-xs font-semibold tracking-widest text-accent uppercase">About FIP</p>
+				<h2 id="fip-info-title" class="mt-2 text-2xl font-extrabold tracking-tight text-ink">
+					What is FIP?
+				</h2>
+			</div>
+			<button
+				type="button"
+				aria-label="Close FIP information"
+				class="{iconHit} {pressable} size-9 shrink-0 border border-divider text-ink-secondary hover:bg-canvas"
+				onclick={closeFipInfo}
+			>
+				<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6 6 18" />
+				</svg>
+			</button>
+		</div>
+		<div class="mt-4 space-y-3 text-sm leading-6 text-ink-secondary">
+			<p>
+				FIP's a Paris radio station that's been jumping between jazz, soul, rock, electro, and film scores since 1971. Almost no talking, just good music.
+			</p>
+			<p>
+				Frisson streams FIP and its themed stations, shows what's playing, and keeps track of what you've heard.
+			</p>
+		</div>
+	</div>
+</dialog>
+
 <div class="min-h-screen bg-surface lg:h-screen lg:overflow-hidden">
 	<div class="grid min-h-screen w-full grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[1.2fr_1fr] lg:overflow-hidden">
 		<!-- Left: player -->
 		<section class="border-b border-divider p-6 sm:p-8 lg:overflow-hidden lg:border-r lg:border-b-0 lg:p-14">
 			<!-- Top bar -->
 			<div class="flex items-start justify-between">
-				<div class="text-2xl font-extrabold tracking-tight text-ink">
-					Frisson<span class="text-accent">.</span>
+				<div class="flex items-center gap-2">
+					<div class="text-2xl font-extrabold tracking-tight text-ink">
+						Frisson<span class="text-accent">.</span>
+					</div>
+					<button
+						type="button"
+						aria-label="What is FIP?"
+						aria-haspopup="dialog"
+						class="{iconHit} {pressable} size-7 border border-divider text-xs font-bold text-ink-secondary hover:bg-canvas"
+						onclick={openFipInfo}
+					>
+						?
+					</button>
 				</div>
 				<div class="flex items-center gap-3">
 					<button
@@ -769,7 +940,15 @@
 			<!-- Category row -->
 			<div class="mt-10 flex items-center justify-between gap-4">
 				<div class="flex min-w-0 items-center gap-2 text-xs font-semibold tracking-widest text-accent uppercase">
-					<span class="size-1.5 rounded-full bg-accent"></span>
+					<span class="relative flex size-1.5 shrink-0 items-center justify-center" aria-hidden="true">
+						<span
+							class="absolute size-1.5 rounded-full will-change-[transform,opacity]"
+							style:background-color={stationDotColor}
+							style:opacity={stationPulseOpacity}
+							style:transform={`scale(${stationPulseScale})`}
+						></span>
+						<span class="relative size-1.5 rounded-full" style:background-color={stationDotColor}></span>
+					</span>
 					{#key selectedStation.name}
 						<span transition:fade={{ duration: prefersReducedMotion.current ? 0 : 140 }}>{selectedStation.name}</span>
 					{/key}
@@ -821,8 +1000,12 @@
 				{/key}
 			</h1>
 			<p class="mt-3 text-ink-secondary">
-				Radio France · webradio <span class="text-ink-tertiary">—</span>
-				<span class="font-medium text-accent" role="status" aria-live="polite">{statusLabel}</span>
+				Radio France · webradio
+				{#if statusLabel}
+					<span class="text-ink-tertiary">—</span>
+					<span class="font-medium text-accent" role="status" aria-live="polite">{statusLabel}</span
+					>
+				{/if}
 			</p>
 			{#if playbackError}
 				<p class="mt-2 text-sm font-medium text-accent" role="alert">{playbackError}</p>
