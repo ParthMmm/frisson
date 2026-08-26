@@ -5,7 +5,6 @@ import {
 	LASTFM_SESSION_COOKIE,
 	lastFmCookieDeleteOptions,
 	lastFmCookieSecure,
-	readAuthTokenCookie,
 	resolveLastFmPublicOrigin,
 	serializeSessionCookieValue,
 	sessionCookieSerializeOptions,
@@ -17,10 +16,7 @@ export const GET: RequestHandler = async ({ fetch, platform, cookies, url }) => 
 	if (!credentials) error(500, 'Last.fm API is not configured');
 
 	const queryToken = url.searchParams.get('token')?.trim();
-	const cookieToken = readAuthTokenCookie(cookies.get(LASTFM_AUTH_TOKEN_COOKIE));
-	if (!queryToken || !cookieToken || queryToken !== cookieToken) {
-		error(400, 'Last.fm auth token mismatch');
-	}
+	if (!queryToken) error(400, 'Last.fm auth token missing');
 
 	const api = createLastFmApi({ credentials, fetch });
 	let session;
