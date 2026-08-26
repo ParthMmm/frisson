@@ -7,6 +7,16 @@
 	import { isAbortError } from '$lib/errors';
 	import type { AppleMusicLookupResponse, CurrentTrack } from '$lib/api';
 	import {
+		createLastFmScrobbler,
+		type LastFmLifecycle,
+		type LastFmPublicSession,
+		type LastFmScrobbleSubmission,
+		type LastFmScrobbleTransport,
+		type LastFmScrobblerSnapshot,
+		type LastFmWriteResult,
+		type LastFmWriteTrack
+	} from '$lib/lastfm-scrobbler';
+	import {
 		createListeningHistory,
 		LISTENING_HISTORY_LIMIT,
 		type ListeningHistorySnapshot
@@ -42,16 +52,93 @@
 	});
 
 	const browserStorage: StorageAdapter = {
-		getItem: (key) => localStorage.getItem(key),
-		setItem: (key, value) => localStorage.setItem(key, value),
-		removeItem: (key) => localStorage.removeItem(key)
+		getItem: (key) => (typeof localStorage === 'undefined' ? null : localStorage.getItem(key)),
+		setItem: (key, value) => {
+			if (typeof localStorage === 'undefined') return;
+			localStorage.setItem(key, value);
+		},
+		removeItem: (key) => {
+			if (typeof localStorage === 'undefined') return;
+			localStorage.removeItem(key);
+		}
 	};
+
+	const lastFmWriteRetryable: LastFmWriteResult = {
+		ok: false,
+		retryable: true,
+		invalidSession: false
+	};
+
+	function parseLastFmPublicSession(body: unknown): LastFmPublicSession | null {
+		if (!body || typeof body !== 'object') return null;
+		const record = body as Record<string, unknown>;
+		if (typeof record.connected !== 'boolean') return null;
+		if (record.username !== null && typeof record.username !== 'string') return null;
+		return { connected: record.connected, username: record.username };
+	}
+
+	function parseLastFmWriteResult(body: unknown): LastFmWriteResult | null {
+		if (!body || typeof body !== 'object') return null;
+		const record = body as Record<string, unknown>;
+		if (record.ok === true) return { ok: true };
+		if (record.ok !== false) return null;
+		return {
+			ok: false,
+			retryable: record.retryable === true,
+			invalidSession: record.invalidSession === true
+		};
+	}
+
+	async function postLastFmWrite(
+		path: string,
+		body: LastFmWriteTrack | LastFmScrobbleSubmission
+	): Promise<LastFmWriteResult> {
+		try {
+			const response = await fetch(path, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			return parseLastFmWriteResult(await response.json()) ?? lastFmWriteRetryable;
+		} catch {
+			return lastFmWriteRetryable;
+		}
+	}
+
+	const lastFmBrowserTransport: LastFmScrobbleTransport = {
+		getSession: async () => {
+			const response = await fetch('/api/lastfm/session');
+			if (!response.ok) throw new Error(`Last.fm session HTTP ${response.status}`);
+			const session = parseLastFmPublicSession(await response.json());
+			if (!session) throw new Error('Last.fm session response was invalid');
+			return session;
+		},
+		disconnect: async () => {
+			const response = await fetch('/api/lastfm/session', { method: 'DELETE' });
+			if (!response.ok) throw new Error(`Last.fm disconnect HTTP ${response.status}`);
+		},
+		updateNowPlaying: (track) => postLastFmWrite('/api/lastfm/now-playing', track),
+		scrobble: (submission) => postLastFmWrite('/api/lastfm/scrobble', submission)
+	};
+
+	const lastFmLifecycle: LastFmLifecycle | undefined =
+		typeof window === 'undefined'
+			? undefined
+			: {
+					addEventListener(type, listener) {
+						window.addEventListener(type, listener);
+					},
+					removeEventListener(type, listener) {
+						window.removeEventListener(type, listener);
+					}
+				};
 
 	let stations = $state<Station[]>(createStationList());
 	let theme = $state<'light' | 'dark'>('light');
 	let volume = $state(80);
 	let audioElement = $state<HTMLAudioElement>();
 	let fipInfoDialog: HTMLDialogElement | undefined = $state();
+	let lastFmDialog: HTMLDialogElement | undefined = $state();
 	let currentTrackClockMs = $state(Date.now());
 	let historyState = $state<ListeningHistorySnapshot>({ items: [], revision: 0 });
 	let historyHydrated = false;
@@ -59,16 +146,24 @@
 	const listeningHistory = createListeningHistory({
 		lookupAppleMusicUrl: fetchAppleMusicUrl
 	});
+	const lastFm = createLastFmScrobbler({
+		storage: browserStorage,
+		transport: lastFmBrowserTransport,
+		redirect: (url) => window.location.assign(url),
+		lifecycle: lastFmLifecycle
+	});
 	const playerSession = createPlayerSession({
 		initialStationId: DEFAULT_SELECTED_STATION_ID,
 		fetchCurrentTrack,
 		audio: getAudioAdapter,
 		history: listeningHistory,
+		scrobbler: lastFm,
 		persistSelectedStation: (stationId) => persistSelectedStationId(stationId, browserStorage),
 		waitForStationUpdate: () => tick(),
 		getVolume: () => volume
 	});
 	let sessionState = $state<PlayerSessionState>(playerSession.getState());
+	let lastFmState = $state<LastFmScrobblerSnapshot>(lastFm.getState());
 
 	// Shared Tailwind class strings instead of custom CSS classes — one
 	// definition, applied wherever a button needs it, no `@layer components`.
@@ -92,6 +187,11 @@
 	});
 
 	const fipInfoMotion = new Tween(0, {
+		duration: () => (prefersReducedMotion.current ? 0 : 220),
+		easing: quintOut
+	});
+
+	const lastFmMotion = new Tween(0, {
 		duration: () => (prefersReducedMotion.current ? 0 : 220),
 		easing: quintOut
 	});
@@ -130,6 +230,19 @@
 	const fipInfoScale = $derived(0.96 + fipInfoMotion.current * 0.04);
 	const fipInfoOffset = $derived((1 - fipInfoMotion.current) * 10);
 	const fipInfoBackdropOpacity = $derived(fipInfoMotion.current);
+	const lastFmScale = $derived(0.96 + lastFmMotion.current * 0.04);
+	const lastFmOffset = $derived((1 - lastFmMotion.current) * 10);
+	const lastFmBackdropOpacity = $derived(lastFmMotion.current);
+	const lastFmConnected = $derived(lastFmState.status === 'connected');
+	const lastFmHeaderLabel = $derived(
+		lastFmState.status === 'connected'
+			? lastFmState.username
+				? `Last.fm connected as ${lastFmState.username}`
+				: 'Last.fm connected'
+			: lastFmState.status === 'expired'
+				? 'Reconnect Last.fm'
+				: 'Connect Last.fm'
+	);
 	const trackTiming = $derived(getTrackTiming(currentTrack, currentTrackClockMs));
 	const playbackProgress = $derived(trackTiming?.progress ?? (isPlaying ? 1 : isLoading ? 0.35 : 0));
 	const currentTrackTimeLabel = $derived(
@@ -279,13 +392,19 @@
 		});
 		listeningHistory.load(browserStorage);
 		historyHydrated = true;
+		const unsubscribeLastFm = lastFm.subscribe((nextState) => {
+			lastFmState = nextState;
+		});
+		void lastFm.hydrate();
 		playerSession.start(persistedStationId ?? DEFAULT_SELECTED_STATION_ID);
 
 		return () => {
 			unsubscribeSession();
 			unsubscribeHistory();
+			unsubscribeLastFm();
 			playerSession.dispose();
 			listeningHistory.dispose();
+			lastFm.dispose();
 		};
 	});
 
@@ -399,6 +518,42 @@
 
 	function closeFipInfoOnBackdrop(event: MouseEvent) {
 		if (event.target === fipInfoDialog) void closeFipInfo();
+	}
+
+	async function openLastFm() {
+		if (!lastFmDialog || lastFmDialog.open) return;
+
+		await lastFmMotion.set(0, { duration: 0 });
+		lastFmDialog.showModal();
+		await tick();
+		void lastFmMotion.set(1);
+	}
+
+	async function closeLastFm() {
+		if (!lastFmDialog?.open) return;
+
+		await lastFmMotion.set(0, {
+			duration: prefersReducedMotion.current ? 0 : 160,
+			easing: quintOut
+		});
+		lastFmDialog.close();
+	}
+
+	function cancelLastFmClose(event: Event) {
+		event.preventDefault();
+		void closeLastFm();
+	}
+
+	function closeLastFmOnBackdrop(event: MouseEvent) {
+		if (event.target === lastFmDialog) void closeLastFm();
+	}
+
+	function connectLastFm() {
+		lastFm.connect();
+	}
+
+	async function disconnectLastFm() {
+		await lastFm.disconnect();
 	}
 
 	async function shareStation() {
@@ -595,6 +750,71 @@
 	</div>
 </dialog>
 
+<dialog
+	bind:this={lastFmDialog}
+	aria-labelledby="lastfm-title"
+	class="fip-info-dialog m-auto w-[min(92vw,28rem)] rounded-card border border-divider bg-surface p-0 text-ink shadow-2xl will-change-[opacity,transform]"
+	style:--fip-info-backdrop-opacity={lastFmBackdropOpacity}
+	style:opacity={lastFmMotion.current}
+	style:transform={`translateY(${lastFmOffset}px) scale(${lastFmScale})`}
+	oncancel={cancelLastFmClose}
+	onclick={closeLastFmOnBackdrop}
+>
+	<div class="p-6 sm:p-7">
+		<div class="flex items-start justify-between gap-4">
+			<h2 id="lastfm-title" class="text-2xl font-extrabold tracking-tight text-ink">
+				Last.fm
+			</h2>
+			<button
+				type="button"
+				aria-label="Close Last.fm"
+				class="{iconHit} {pressable} size-9 shrink-0 border border-divider text-ink-secondary hover:bg-canvas"
+				onclick={closeLastFm}
+			>
+				<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6 6 18" />
+				</svg>
+			</button>
+		</div>
+		<div class="mt-4 space-y-3 text-sm leading-6 text-ink-secondary">
+			{#if lastFmState.status === 'connected'}
+				<p>
+					Scrobbling as @{lastFmState.username}. Radio scrobbles are marked as not chosen by you.
+				</p>
+			{:else if lastFmState.status === 'expired'}
+				<p>Session expired. Reconnect to resume scrobbling.</p>
+			{:else}
+				<p>Scrobble FIP tracks to your Last.fm account.</p>
+			{/if}
+		</div>
+		{#if lastFmState.status === 'connected'}
+			<button
+				type="button"
+				class="{pressable} mt-6 w-full rounded-2xl border border-divider py-3 text-sm font-semibold text-ink-secondary hover:bg-canvas"
+				onclick={disconnectLastFm}
+			>
+				Disconnect
+			</button>
+		{:else if lastFmState.status === 'expired'}
+			<button
+				type="button"
+				class="{pressable} mt-6 w-full rounded-2xl bg-ink py-3 text-sm font-semibold text-surface hover:bg-ink/90"
+				onclick={connectLastFm}
+			>
+				Connect again
+			</button>
+		{:else}
+			<button
+				type="button"
+				class="{pressable} mt-6 w-full rounded-2xl bg-ink py-3 text-sm font-semibold text-surface hover:bg-ink/90"
+				onclick={connectLastFm}
+			>
+				Connect Last.fm
+			</button>
+		{/if}
+	</div>
+</dialog>
+
 <main class="min-h-screen bg-surface lg:h-screen lg:overflow-hidden">
 	<div class="grid min-h-screen w-full grid-cols-1 lg:h-full lg:min-h-0 lg:grid-cols-[1.2fr_1fr] lg:overflow-hidden">
 		<!-- Left: player -->
@@ -628,6 +848,35 @@
 					</button>
 				</div>
 				<div class="flex items-center gap-3">
+					<button
+						type="button"
+						aria-label={lastFmHeaderLabel}
+						aria-haspopup="dialog"
+						class="{iconHit} {pressable} {lastFmConnected
+							? lastFmState.username
+								? 'h-9 gap-1.5 bg-accent-subtle px-2 text-accent'
+								: 'size-9 bg-accent-subtle text-accent'
+							: 'size-9 border border-divider text-ink-secondary hover:bg-canvas'}"
+						onclick={openLastFm}
+					>
+						<svg
+							viewBox="0 0 24 24"
+							class="size-4"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="2"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M6 18V8.2C6 6.8 7.1 6 8.5 6H13" />
+							<path d="M6 12h5.5" />
+							<path d="M14 18V10l2.6 5.2L19.2 10V18" />
+						</svg>
+						{#if lastFmConnected && lastFmState.username}
+							<span class="max-w-20 truncate text-xs font-medium">@{lastFmState.username}</span>
+						{/if}
+					</button>
 					<button
 						type="button"
 						aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
