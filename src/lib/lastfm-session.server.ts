@@ -24,6 +24,23 @@ export function lastFmCookieSecure(url: URL): boolean {
 	return url.protocol === 'https:';
 }
 
+/**
+ * Prefer PORTLESS_URL when the Vite app sits behind the Portless HTTPS proxy.
+ * Without it, OAuth callbacks and Secure cookies see the loopback origin.
+ */
+export function resolveLastFmPublicOrigin(requestUrl: URL): URL {
+	const fromEnv =
+		typeof process !== 'undefined' ? process.env?.PORTLESS_URL?.trim() : undefined;
+	if (fromEnv) {
+		try {
+			return new URL(fromEnv);
+		} catch {
+			// Fall through to the request URL.
+		}
+	}
+	return requestUrl;
+}
+
 export function readSessionCookie(value: string | undefined): LastFmSessionCookie | null {
 	if (!value) return null;
 	let parsed: unknown;

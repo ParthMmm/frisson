@@ -13,6 +13,7 @@ import {
 	lastFmCookieDeleteOptions,
 	lastFmCookieSecure,
 	readSessionCookie,
+	resolveLastFmPublicOrigin,
 } from '$lib/lastfm-session.server';
 import type { RequestHandler } from './$types';
 
@@ -42,7 +43,10 @@ export const POST: RequestHandler = async ({ request, cookies, fetch, platform, 
 	const api = createLastFmApi({ credentials, fetch });
 	const result = await api.scrobble(session.sessionKey, submission);
 	if (!result.ok && result.invalidSession) {
-		cookies.delete(LASTFM_SESSION_COOKIE, lastFmCookieDeleteOptions(lastFmCookieSecure(url)));
+		cookies.delete(
+			LASTFM_SESSION_COOKIE,
+			lastFmCookieDeleteOptions(lastFmCookieSecure(resolveLastFmPublicOrigin(url))),
+		);
 	}
 	return json(result, { status: lastFmWriteHttpStatus(result) });
 };

@@ -5,6 +5,7 @@ import {
 	lastFmCookieDeleteOptions,
 	lastFmCookieSecure,
 	readSessionCookie,
+	resolveLastFmPublicOrigin,
 } from '$lib/lastfm-session.server';
 import type { RequestHandler } from './$types';
 
@@ -17,6 +18,9 @@ export const GET: RequestHandler = async ({ cookies }) => {
 };
 
 export const DELETE: RequestHandler = async ({ cookies, url }) => {
-	cookies.delete(LASTFM_SESSION_COOKIE, lastFmCookieDeleteOptions(lastFmCookieSecure(url)));
+	cookies.delete(
+		LASTFM_SESSION_COOKIE,
+		lastFmCookieDeleteOptions(lastFmCookieSecure(resolveLastFmPublicOrigin(url))),
+	);
 	return new Response(null, { status: 204 });
 };

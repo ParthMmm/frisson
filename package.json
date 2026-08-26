@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
+		"dev:portless": "portless frisson vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
@@ -24,6 +25,7 @@
 		"@tailwindcss/vite": "^4.3.0",
 		"oxfmt": "^0.56.0",
 		"oxlint": "^1.71.0",
+		"portless": "^0.15.5",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"tailwindcss": "^4.3.0",

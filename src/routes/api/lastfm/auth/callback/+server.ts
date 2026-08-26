@@ -6,6 +6,7 @@ import {
 	lastFmCookieDeleteOptions,
 	lastFmCookieSecure,
 	readAuthTokenCookie,
+	resolveLastFmPublicOrigin,
 	serializeSessionCookieValue,
 	sessionCookieSerializeOptions,
 } from '$lib/lastfm-session.server';
@@ -29,7 +30,8 @@ export const GET: RequestHandler = async ({ fetch, platform, cookies, url }) => 
 		error(502, 'Last.fm session request failed');
 	}
 
-	const secure = lastFmCookieSecure(url);
+	const publicOrigin = resolveLastFmPublicOrigin(url);
+	const secure = lastFmCookieSecure(publicOrigin);
 	cookies.set(
 		LASTFM_SESSION_COOKIE,
 		serializeSessionCookieValue({
