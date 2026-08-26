@@ -1,0 +1,87 @@
+import { toSessionKey, type SessionKey } from './lastfm-api.server';
+
+export const LASTFM_SESSION_COOKIE = 'frisson-lastfm-session';
+export const LASTFM_AUTH_TOKEN_COOKIE = 'frisson-lastfm-auth-token';
+export const LASTFM_COOKIE_PATH = '/api/lastfm' as const;
+
+export const LASTFM_SESSION_MAX_AGE = 60 * 60 * 24 * 365;
+export const LASTFM_AUTH_TOKEN_MAX_AGE = 15 * 60;
+
+export type LastFmSessionCookie = {
+	sessionKey: SessionKey;
+	username: string;
+};
+
+export type LastFmCookieSerializeOptions = {
+	path: typeof LASTFM_COOKIE_PATH;
+	httpOnly: true;
+	secure: boolean;
+	sameSite: 'lax';
+	maxAge: number;
+};
+
+export function lastFmCookieSecure(url: URL): boolean {
+	return url.protocol === 'https:';
+}
+
+export function readSessionCookie(value: string | undefined): LastFmSessionCookie | null {
+	if (!value) return null;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(value);
+	} catch {
+		return null;
+	}
+	if (!parsed || typeof parsed !== 'object') return null;
+	const record = parsed as Record<string, unknown>;
+	if (typeof record.sessionKey !== 'string' || typeof record.username !== 'string') return null;
+	const sessionKey = toSessionKey(record.sessionKey);
+	const username = record.username.trim();
+	if (!sessionKey || username.length === 0) return null;
+	return { sessionKey, username };
+}
+
+export function serializeSessionCookieValue(session: LastFmSessionCookie): string {
+	return JSON.stringify({
+		sessionKey: session.sessionKey,
+		username: session.username,
+	});
+}
+
+export function readAuthTokenCookie(value: string | undefined): string | null {
+	if (!value) return null;
+	const token = value.trim();
+	return token.length > 0 ? token : null;
+}
+
+export function sessionCookieSerializeOptions(secure: boolean): LastFmCookieSerializeOptions {
+	return {
+		...lastFmCookieBase(secure),
+		maxAge: LASTFM_SESSION_MAX_AGE,
+	};
+}
+
+export function authTokenCookieSerializeOptions(secure: boolean): LastFmCookieSerializeOptions {
+	return {
+		...lastFmCookieBase(secure),
+		maxAge: LASTFM_AUTH_TOKEN_MAX_AGE,
+	};
+}
+
+export function lastFmCookieDeleteOptions(secure: boolean) {
+	return lastFmCookieBase(secure);
+}
+
+function lastFmCookieBase(secure: boolean): {
+	path: typeof LASTFM_COOKIE_PATH;
+	httpOnly: true;
+	secure: boolean;
+	sameSite: 'lax';
+} {
+	return {
+		path: LASTFM_COOKIE_PATH,
+		httpOnly: true,
+		secure,
+		sameSite: 'lax',
+	};
+}

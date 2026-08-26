@@ -9,6 +9,8 @@ declare global {
 		interface Platform {
 			env: {
 				RADIO_FRANCE_TOKEN: string;
+				LASTFM_API_KEY: string;
+				LASTFM_SHARED_SECRET: string;
 			};
 		}
 	}
