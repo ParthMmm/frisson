@@ -52,15 +52,9 @@
 	});
 
 	const browserStorage: StorageAdapter = {
-		getItem: (key) => (typeof localStorage === 'undefined' ? null : localStorage.getItem(key)),
-		setItem: (key, value) => {
-			if (typeof localStorage === 'undefined') return;
-			localStorage.setItem(key, value);
-		},
-		removeItem: (key) => {
-			if (typeof localStorage === 'undefined') return;
-			localStorage.removeItem(key);
-		}
+		getItem: (key) => localStorage.getItem(key),
+		setItem: (key, value) => localStorage.setItem(key, value),
+		removeItem: (key) => localStorage.removeItem(key)
 	};
 
 	const lastFmWriteRetryable: LastFmWriteResult = {
@@ -68,26 +62,6 @@
 		retryable: true,
 		invalidSession: false
 	};
-
-	function parseLastFmPublicSession(body: unknown): LastFmPublicSession | null {
-		if (!body || typeof body !== 'object') return null;
-		const record = body as Record<string, unknown>;
-		if (typeof record.connected !== 'boolean') return null;
-		if (record.username !== null && typeof record.username !== 'string') return null;
-		return { connected: record.connected, username: record.username };
-	}
-
-	function parseLastFmWriteResult(body: unknown): LastFmWriteResult | null {
-		if (!body || typeof body !== 'object') return null;
-		const record = body as Record<string, unknown>;
-		if (record.ok === true) return { ok: true };
-		if (record.ok !== false) return null;
-		return {
-			ok: false,
-			retryable: record.retryable === true,
-			invalidSession: record.invalidSession === true
-		};
-	}
 
 	async function postLastFmWrite(
 		path: string,
@@ -99,7 +73,7 @@
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify(body)
 			});
-			return parseLastFmWriteResult(await response.json()) ?? lastFmWriteRetryable;
+			return (await response.json()) as LastFmWriteResult;
 		} catch {
 			return lastFmWriteRetryable;
 		}
@@ -109,9 +83,7 @@
 		getSession: async () => {
 			const response = await fetch('/api/lastfm/session');
 			if (!response.ok) throw new Error(`Last.fm session HTTP ${response.status}`);
-			const session = parseLastFmPublicSession(await response.json());
-			if (!session) throw new Error('Last.fm session response was invalid');
-			return session;
+			return (await response.json()) as LastFmPublicSession;
 		},
 		disconnect: async () => {
 			const response = await fetch('/api/lastfm/session', { method: 'DELETE' });
@@ -1288,7 +1260,9 @@
 								>
 							{/if}
 						</button>
-						<span class="rounded-full bg-canvas px-2 py-1 text-xs tabular-nums text-ink-tertiary">
+						<span
+							class="flex h-8 items-center rounded-full bg-canvas px-2.5 text-xs leading-none tabular-nums text-ink-tertiary"
+						>
 							{historyItems.length}/{LISTENING_HISTORY_LIMIT}
 						</span>
 					</div>

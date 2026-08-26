@@ -1,9 +1,7 @@
 import { error, redirect } from '@sveltejs/kit';
 import { createLastFmApi, readLastFmCredentials } from '$lib/lastfm-api.server';
 import {
-	LASTFM_AUTH_TOKEN_COOKIE,
 	LASTFM_SESSION_COOKIE,
-	lastFmCookieDeleteOptions,
 	lastFmCookieSecure,
 	resolveLastFmPublicOrigin,
 	serializeSessionCookieValue,
@@ -36,6 +34,5 @@ export const GET: RequestHandler = async ({ fetch, platform, cookies, url }) => 
 		}),
 		sessionCookieSerializeOptions(secure),
 	);
-	cookies.delete(LASTFM_AUTH_TOKEN_COOKIE, lastFmCookieDeleteOptions(secure));
 	redirect(302, '/');
 };

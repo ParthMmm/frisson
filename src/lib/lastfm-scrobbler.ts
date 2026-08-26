@@ -11,7 +11,6 @@ export const LASTFM_MAX_LISTEN_BEFORE_SCROBBLE_SECONDS = 4 * 60;
 
 const LASTFM_SUBMITTED_RING_LIMIT = 64;
 
-/** Chrome-only. Never contains a session key. */
 export type LastFmAuthStatus = 'unknown' | 'disconnected' | 'connected' | 'expired';
 
 export type LastFmScrobblerSnapshot = {
@@ -25,7 +24,6 @@ export type LastFmPublicSession = {
 	username: string | null;
 };
 
-/** What the client POST body carries. Server adds sk, api_sig, chosenByUser. */
 export type LastFmWriteTrack = {
 	title: string;
 	artist: string;
@@ -34,7 +32,7 @@ export type LastFmWriteTrack = {
 };
 
 export type LastFmScrobbleSubmission = LastFmWriteTrack & {
-	/** Unix seconds, captured when the listen crossed the scrobble threshold. */
+	/** Unix seconds when the listen crossed the scrobble threshold. */
 	listenedAt: number;
 };
 

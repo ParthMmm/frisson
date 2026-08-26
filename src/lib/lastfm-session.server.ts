@@ -2,11 +2,9 @@ import { env } from '$env/dynamic/private';
 import { toSessionKey, type SessionKey } from './lastfm-api.server';
 
 export const LASTFM_SESSION_COOKIE = 'frisson-lastfm-session';
-export const LASTFM_AUTH_TOKEN_COOKIE = 'frisson-lastfm-auth-token';
 export const LASTFM_COOKIE_PATH = '/api/lastfm' as const;
 
 export const LASTFM_SESSION_MAX_AGE = 60 * 60 * 24 * 365;
-export const LASTFM_AUTH_TOKEN_MAX_AGE = 15 * 60;
 
 export type LastFmSessionCookie = {
 	sessionKey: SessionKey;
@@ -65,23 +63,10 @@ export function serializeSessionCookieValue(session: LastFmSessionCookie): strin
 	});
 }
 
-export function readAuthTokenCookie(value: string | undefined): string | null {
-	if (!value) return null;
-	const token = value.trim();
-	return token.length > 0 ? token : null;
-}
-
 export function sessionCookieSerializeOptions(secure: boolean): LastFmCookieSerializeOptions {
 	return {
 		...lastFmCookieBase(secure),
 		maxAge: LASTFM_SESSION_MAX_AGE,
-	};
-}
-
-export function authTokenCookieSerializeOptions(secure: boolean): LastFmCookieSerializeOptions {
-	return {
-		...lastFmCookieBase(secure),
-		maxAge: LASTFM_AUTH_TOKEN_MAX_AGE,
 	};
 }
 

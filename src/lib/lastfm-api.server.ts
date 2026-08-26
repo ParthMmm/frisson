@@ -18,7 +18,6 @@ export type LastFmCredentials = {
 };
 
 export interface LastFmApi {
-	getToken(): Promise<string>;
 	getSession(token: string): Promise<{ sessionKey: SessionKey; username: string }>;
 	updateNowPlaying(sessionKey: SessionKey, track: LastFmWriteTrack): Promise<LastFmWriteResult>;
 	scrobble(
@@ -168,21 +167,6 @@ export function createLastFmApi(options: {
 	}
 
 	return {
-		async getToken() {
-			const payload = await call({
-				method: 'auth.getToken',
-				api_key: apiKey,
-			});
-			const token =
-				payload && typeof payload === 'object' && 'token' in payload
-					? (payload as { token: unknown }).token
-					: null;
-			if (typeof token !== 'string' || token.trim().length === 0) {
-				throw new LastFmApiRequestError('Last.fm token was missing', null);
-			}
-			return token.trim();
-		},
-
 		async getSession(token: string) {
 			const payload = await call({
 				method: 'auth.getSession',
