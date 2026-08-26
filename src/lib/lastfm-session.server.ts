@@ -1,3 +1,4 @@
+import { env } from '$env/dynamic/private';
 import { toSessionKey, type SessionKey } from './lastfm-api.server';
 
 export const LASTFM_SESSION_COOKIE = 'frisson-lastfm-session';
@@ -29,8 +30,7 @@ export function lastFmCookieSecure(url: URL): boolean {
  * Without it, OAuth callbacks and Secure cookies see the loopback origin.
  */
 export function resolveLastFmPublicOrigin(requestUrl: URL): URL {
-	const fromEnv =
-		typeof process !== 'undefined' ? process.env?.PORTLESS_URL?.trim() : undefined;
+	const fromEnv = env.PORTLESS_URL?.trim();
 	if (fromEnv) {
 		try {
 			return new URL(fromEnv);
