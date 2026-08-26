@@ -2,67 +2,36 @@
 	import { flip } from 'svelte/animate';
 	import { linear, cubicOut, quintOut } from 'svelte/easing';
 	import { Tween, prefersReducedMotion } from 'svelte/motion';
-	import { writable } from 'svelte/store';
 	import { onMount, tick } from 'svelte';
 	import { fade } from 'svelte/transition';
-	import { normalizeTrackText } from '$lib/text';
 	import { isAbortError } from '$lib/errors';
-	import {
-		getCurrentTrackCacheExpiresAt,
-		getMetadataFailureState,
-		getMetadataRefreshDelay,
-		type MetadataState
-	} from '$lib/metadata-refresh';
 	import type { AppleMusicLookupResponse, CurrentTrack } from '$lib/api';
 	import {
-		createPlaybackRecovery,
-		type PlaybackRecoveryController
-	} from '$lib/playback-recovery';
+		createListeningHistory,
+		LISTENING_HISTORY_LIMIT,
+		type ListeningHistorySnapshot
+	} from '$lib/listening-history';
+	import {
+		createPlayerSession,
+		type PlayerAudioAdapter,
+		type PlayerSessionState
+	} from '$lib/player-session';
+	import {
+		applyPersistedFavoriteStations,
+		createStationList,
+		DEFAULT_SELECTED_STATION_ID,
+		persistFavoriteStations,
+		persistSelectedStationId,
+		readPersistedSelectedStationId,
+		type Station,
+		type StorageAdapter
+	} from '$lib/station-catalog';
 	import Tuner from '$lib/Tuner.svelte';
 	import TrackSummary from '$lib/TrackSummary.svelte';
 
-	type Station = {
-		name: string;
-		number: string;
-		tag: string;
-		shortName: string;
-		streamUrl: string;
-		apiStation: string;
-		favorite: boolean;
-	};
-
-	type ListeningHistoryItem = {
-		id: string;
-		title: string;
-		artist: string;
-		artworkUrl: string | null;
-		appleMusicUrl: string | null;
-		isAppleMusicLookupLoading: boolean;
-		stationName: string;
-		stationTag: string;
-		listenedAt: number;
-	};
-
-	type CachedCurrentTrack = {
-		track: CurrentTrack | null;
-		expiresAt: number;
-	};
-
-	type CurrentTrackResponse = CurrentTrack | null;
-
-	type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
-
-	const METADATA_SAFETY_POLL_MS = 120_000;
 	const TRACK_TIME_TICK_MS = 1000;
-	const LISTENING_HISTORY_LIMIT = 30;
-	const LISTENING_HISTORY_STORAGE_KEY = 'frisson-listening-history-v1';
-	const LEGACY_LISTENING_HISTORY_STORAGE_KEY = 'fip-listening-history-v1';
-	const FAVORITE_STATIONS_STORAGE_KEY = 'frisson-favorite-stations-v1';
-	const FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY = 'frisson-favorite-stations-customized-v1';
 	const THEME_STORAGE_KEY = 'frisson-theme';
 	const LEGACY_THEME_STORAGE_KEY = 'fip-theme';
-	const SELECTED_STATION_STORAGE_KEY = 'frisson-selected-station';
-	const APPLE_MUSIC_URL_CACHE_LIMIT = 128;
 	const historyTimeFormatter = new Intl.DateTimeFormat(undefined, {
 		hour: '2-digit',
 		minute: '2-digit'
@@ -71,134 +40,35 @@
 		month: 'numeric',
 		day: 'numeric'
 	});
-	const currentTrackCache = new Map<string, CachedCurrentTrack>();
-	const appleMusicUrlCache = new Map<string, string | null>();
-	const appleMusicUrlRequests = new Map<string, Promise<string | null>>();
 
-	let stations = $state<Station[]>([
-		{
-			name: 'FIP',
-			number: '7',
-			tag: '105.1 MHZ',
-			shortName: 'FIP',
-			streamUrl: 'https://icecast.radiofrance.fr/fip-midfi.mp3',
-			apiStation: 'FIP',
-			favorite: false
-		},
-		{
-			name: 'FIP Rock',
-			number: '64',
-			tag: 'ROCK',
-			shortName: 'ROCK',
-			streamUrl: 'https://icecast.radiofrance.fr/fiprock-midfi.mp3',
-			apiStation: 'FIP_ROCK',
-			favorite: false
-		},
-		{
-			name: 'FIP Jazz',
-			number: '65',
-			tag: 'JAZZ',
-			shortName: 'JAZZ',
-			streamUrl: 'https://icecast.radiofrance.fr/fipjazz-midfi.mp3',
-			apiStation: 'FIP_JAZZ',
-			favorite: false
-		},
-		{
-			name: 'FIP Groove',
-			number: '66',
-			tag: 'GROOVE',
-			shortName: 'GROOVE',
-			streamUrl: 'https://icecast.radiofrance.fr/fipgroove-midfi.mp3',
-			apiStation: 'FIP_GROOVE',
-			favorite: true
-		},
-		{
-			name: 'FIP Monde',
-			number: '69',
-			tag: 'MONDE',
-			shortName: 'MONDE',
-			streamUrl: 'https://icecast.radiofrance.fr/fipworld-midfi.mp3',
-			apiStation: 'FIP_WORLD',
-			favorite: false
-		},
-		{
-			name: 'FIP Nouveautés',
-			number: '70',
-			tag: 'NOUVEAUTÉS',
-			shortName: 'NOUVO',
-			streamUrl: 'https://icecast.radiofrance.fr/fipnouveautes-midfi.mp3',
-			apiStation: 'FIP_NOUVEAUTES',
-			favorite: true
-		},
-		{
-			name: 'FIP Reggae',
-			number: '71',
-			tag: 'REGGAE',
-			shortName: 'REGGAE',
-			streamUrl: 'https://icecast.radiofrance.fr/fipreggae-midfi.mp3',
-			apiStation: 'FIP_REGGAE',
-			favorite: false
-		},
-		{
-			name: 'FIP Electro',
-			number: '74',
-			tag: 'ELECTRO',
-			shortName: 'ELECTRO',
-			streamUrl: 'https://icecast.radiofrance.fr/fipelectro-midfi.mp3',
-			apiStation: 'FIP_ELECTRO',
-			favorite: false
-		},
-		{
-			name: 'FIP Metal',
-			number: '77',
-			tag: 'METAL',
-			shortName: 'METAL',
-			streamUrl: 'https://icecast.radiofrance.fr/fipmetal-midfi.mp3',
-			apiStation: 'FIP_METAL',
-			favorite: false
-		},
-		{
-			name: 'FIP Pop',
-			number: '78',
-			tag: 'POP',
-			shortName: 'POP',
-			streamUrl: 'https://icecast.radiofrance.fr/fippop-midfi.mp3',
-			apiStation: 'FIP_POP',
-			favorite: false
-		},
-		{
-			name: 'FIP Hip-Hop',
-			number: '95',
-			tag: 'HIP-HOP',
-			shortName: 'HIP-HOP',
-			streamUrl: 'https://icecast.radiofrance.fr/fiphiphop-midfi.mp3',
-			apiStation: 'FIP_HIP_HOP',
-			favorite: false
-		}
-	]);
+	const browserStorage: StorageAdapter = {
+		getItem: (key) => localStorage.getItem(key),
+		setItem: (key, value) => localStorage.setItem(key, value),
+		removeItem: (key) => localStorage.removeItem(key)
+	};
 
-	let selectedStationName = $state('FIP Nouveautés');
-	let playbackState = $state<PlaybackState>('idle');
-	let volume = $state(80);
+	let stations = $state<Station[]>(createStationList());
 	let theme = $state<'light' | 'dark'>('light');
-	let audioElement: HTMLAudioElement;
+	let volume = $state(80);
+	let audioElement = $state<HTMLAudioElement>();
 	let fipInfoDialog: HTMLDialogElement | undefined = $state();
-	let playbackError = $state('');
-	let shareMessage = $state('');
-	let currentTrack = $state<CurrentTrack | null>(null);
 	let currentTrackClockMs = $state(Date.now());
-	const listeningHistory = writable<ListeningHistoryItem[]>([]);
-	let lastHistorySignature = '';
-	let metadataState = $state<MetadataState>('idle');
-	let isAppleMusicLookupLoading = $state(false);
-	let appleMusicLookupRevision = $state(0);
-	let currentTrackRequest: AbortController | null = null;
-	let currentTrackRequestId = 0;
-	let metadataPoll: number | null = null;
-	let metadataRefreshTimeout: number | null = null;
-	let playRequestId = 0;
-	let isPlaybackRecoveryPending = $state(false);
-	let playbackRecovery: PlaybackRecoveryController | null = null;
+	let historyState = $state<ListeningHistorySnapshot>({ items: [], revision: 0 });
+	let historyHydrated = false;
+
+	const listeningHistory = createListeningHistory({
+		lookupAppleMusicUrl: fetchAppleMusicUrl
+	});
+	const playerSession = createPlayerSession({
+		initialStationId: DEFAULT_SELECTED_STATION_ID,
+		fetchCurrentTrack,
+		audio: getAudioAdapter,
+		history: listeningHistory,
+		persistSelectedStation: (stationId) => persistSelectedStationId(stationId, browserStorage),
+		waitForStationUpdate: () => tick(),
+		getVolume: () => volume
+	});
+	let sessionState = $state<PlayerSessionState>(playerSession.getState());
 
 	// Shared Tailwind class strings instead of custom CSS classes — one
 	// definition, applied wherever a button needs it, no `@layer components`.
@@ -234,8 +104,15 @@
 	let historyArrivalPulse = 0;
 
 	const selectedStation = $derived(
-		stations.find((station) => station.name === selectedStationName) ?? stations[0]
+		stations.find((station) => station.id === sessionState.selectedStationId) ?? stations[0]
 	);
+	const playbackState = $derived(sessionState.playbackState);
+	const playbackError = $derived(sessionState.playbackError);
+	const shareMessage = $derived(sessionState.shareMessage);
+	const currentTrack = $derived(sessionState.currentTrack);
+	const metadataState = $derived(sessionState.metadataState);
+	const isPlaybackRecoveryPending = $derived(sessionState.isPlaybackRecoveryPending);
+	const historyItems = $derived(historyState.items);
 	const isPlaying = $derived(playbackState === 'playing');
 	const isLoading = $derived(playbackState === 'loading');
 	const stationPulseScale = $derived(isPlaying ? 1 + stationPulse.current * 2.4 : 1);
@@ -261,9 +138,8 @@
 			: ''
 	);
 	// Radio France crossfades into the next track before its metadata refresh
-	// lands (see METADATA_REFRESH_GRACE_MS) — elapsed time caps at the track's
-	// duration in that window, so this is true for the few seconds the old
-	// track has "ended" but `currentTrack` hasn't flipped to the new song yet.
+	// lands — elapsed time caps at the track's duration in that window, so this
+	// is true while the old track remains visible for a few seconds.
 	const isCrossfading = $derived(isPlaying && trackTiming !== null && trackTiming.progress >= 1);
 	const playbackProgressMotion = Tween.of(() => playbackProgress, {
 		duration: () =>
@@ -294,10 +170,17 @@
 					? 'Pause stream'
 					: 'Play stream'
 	);
-	const currentTrackAppleMusicMode = $derived.by(() => {
-		void appleMusicLookupRevision;
-		return currentTrack && !hasNoAppleMusicMatch(currentTrack) ? 'button' : 'none';
+	const currentTrackAppleMusicState = $derived.by(() => {
+		void historyState.revision;
+		return currentTrack
+			? listeningHistory.getAppleMusicLookupState(currentTrack)
+			: { status: 'unknown' as const, url: null };
 	});
+	const currentTrackAppleMusicMode = $derived(
+		currentTrack && currentTrackAppleMusicState.status !== 'no-match' ? 'button' : 'none'
+	);
+	const isAppleMusicLookupLoading = $derived(currentTrackAppleMusicState.status === 'loading');
+
 	$effect(() => {
 		const timingBounds = getTrackTimingBounds(currentTrack);
 		if (!timingBounds) return;
@@ -305,17 +188,12 @@
 		currentTrackClockMs = Math.min(Date.now(), timingBounds.endMs);
 		if (currentTrackClockMs >= timingBounds.endMs) return;
 
-		const tick = window.setInterval(() => {
+		const tickHandle = window.setInterval(() => {
 			currentTrackClockMs = Math.min(Date.now(), timingBounds.endMs);
-			if (currentTrackClockMs >= timingBounds.endMs) window.clearInterval(tick);
+			if (currentTrackClockMs >= timingBounds.endMs) window.clearInterval(tickHandle);
 		}, TRACK_TIME_TICK_MS);
 
-		return () => window.clearInterval(tick);
-	});
-
-	$effect(() => {
-		if (!hasActivePlayback || !currentTrack) return;
-		recordListeningHistory(currentTrack, selectedStation);
+		return () => window.clearInterval(tickHandle);
 	});
 
 	$effect(() => {
@@ -382,153 +260,77 @@
 	onMount(() => {
 		// app.html already set this pre-paint; just mirror it into state.
 		theme = (document.documentElement.dataset.theme as 'light' | 'dark') ?? 'light';
-		applyPersistedFavoriteStations();
-		selectedStationName = readPersistedSelectedStationName() ?? selectedStationName;
-		listeningHistory.set(readPersistedListeningHistory());
-		const unsubscribeListeningHistory = listeningHistory.subscribe(persistListeningHistory);
-		playbackRecovery = createPlaybackRecovery({
-			audio: () => audioElement,
-			isPlaybackExpected: () => hasActivePlayback,
-			recover: () => play({ reload: true }),
-			onRecoveryPendingChange: (pending) => {
-				isPlaybackRecoveryPending = pending;
-			},
+		stations = applyPersistedFavoriteStations(stations, browserStorage);
+		const persistedStationId = readPersistedSelectedStationId(browserStorage);
+		if (persistedStationId) persistSelectedStationId(persistedStationId, browserStorage);
+		const unsubscribeSession = playerSession.subscribe((nextState) => {
+			sessionState = nextState;
 		});
-		void loadCurrentTrack(selectedStation);
-		metadataPoll = window.setInterval(() => {
-			void loadCurrentTrack(selectedStation);
-		}, METADATA_SAFETY_POLL_MS);
+		const unsubscribeHistory = listeningHistory.subscribe((nextState) => {
+			const previousLatestId = historyState.items[0]?.id;
+			historyState = nextState;
+			if (
+				historyHydrated &&
+				nextState.items[0]?.id &&
+				nextState.items[0]?.id !== previousLatestId
+			) {
+				void pulseHistoryArrival();
+			}
+		});
+		listeningHistory.load(browserStorage);
+		historyHydrated = true;
+		playerSession.start(persistedStationId ?? DEFAULT_SELECTED_STATION_ID);
 
 		return () => {
-			unsubscribeListeningHistory();
-			playbackRecovery?.dispose();
-			if (metadataPoll !== null) window.clearInterval(metadataPoll);
-			clearNextMetadataRefresh();
-			currentTrackRequest?.abort();
+			unsubscribeSession();
+			unsubscribeHistory();
+			playerSession.dispose();
+			listeningHistory.dispose();
 		};
 	});
 
-	function readPersistedSelectedStationName() {
-		try {
-			const stored = localStorage.getItem(SELECTED_STATION_STORAGE_KEY);
-			if (!stored) return null;
+	function getAudioAdapter(): PlayerAudioAdapter | null {
+		if (!audioElement) return null;
 
-			return stations.some((station) => station.name === stored) ? stored : null;
-		} catch {
-			return null;
-		}
-	}
-
-	function persistSelectedStationName(name: string) {
-		try {
-			localStorage.setItem(SELECTED_STATION_STORAGE_KEY, name);
-		} catch {
-			/* private browsing, storage quota, etc. */
-		}
-	}
-
-	function applyPersistedFavoriteStations() {
-		try {
-			const stored = localStorage.getItem(FAVORITE_STATIONS_STORAGE_KEY);
-			if (!stored) {
-				if (localStorage.getItem(FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY)) {
-					for (const station of stations) {
-						station.favorite = false;
-					}
-				}
-				return;
+		return {
+			getSnapshot: () => ({ paused: audioElement?.paused ?? true, ended: audioElement?.ended ?? false }),
+			play: () => audioElement!.play(),
+			pause: () => audioElement?.pause(),
+			load: () => audioElement?.load(),
+			setVolume: (nextVolume) => {
+				if (audioElement) audioElement.volume = nextVolume;
 			}
-
-			const parsed: unknown = JSON.parse(stored);
-			if (!Array.isArray(parsed)) return;
-
-			const favoriteNames = new Set(
-				parsed.filter((name): name is string => typeof name === 'string')
-			);
-			for (const station of stations) {
-				station.favorite = favoriteNames.has(station.name);
-			}
-		} catch {
-			/* private browsing, malformed data, etc. */
-		}
+		};
 	}
 
-	function persistFavoriteStations() {
-		try {
-			const favoriteNames = stations
-				.filter((station) => station.favorite)
-				.map((station) => station.name);
-
-			if (favoriteNames.length === 0) {
-				localStorage.removeItem(FAVORITE_STATIONS_STORAGE_KEY);
-				localStorage.setItem(FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY, 'true');
-				return;
-			}
-
-			localStorage.setItem(FAVORITE_STATIONS_STORAGE_KEY, JSON.stringify(favoriteNames));
-			localStorage.setItem(FAVORITE_STATIONS_CUSTOMIZED_STORAGE_KEY, 'true');
-		} catch {
-			/* private browsing, storage quota, etc. */
-		}
+	async function fetchCurrentTrack(station: Station, signal: AbortSignal) {
+		const params = new URLSearchParams({ station: station.id });
+		const response = await fetch(`/api/current-track?${params}`, { signal });
+		if (!response.ok) throw new Error(`Current track metadata returned HTTP ${response.status}`);
+		return (await response.json()) as CurrentTrack | null;
 	}
 
-	function readPersistedListeningHistory() {
-		try {
-			const stored =
-				localStorage.getItem(LISTENING_HISTORY_STORAGE_KEY) ??
-				localStorage.getItem(LEGACY_LISTENING_HISTORY_STORAGE_KEY);
-			if (!stored) return [];
+	async function fetchAppleMusicUrl(track: Pick<CurrentTrack, 'title' | 'artist'>) {
+		const params = new URLSearchParams({
+			title: track.title,
+			artist: track.artist
+		});
+		const response = await fetch(`/api/apple-music?${params}`);
 
-			const parsed: unknown = JSON.parse(stored);
-			if (!Array.isArray(parsed)) return [];
+		if (!response.ok) throw new Error('Apple Music lookup failed');
 
-			return parsed
-				.filter(isListeningHistoryItem)
-				.map((item) => ({ ...item, isAppleMusicLookupLoading: false }))
-				.slice(0, LISTENING_HISTORY_LIMIT);
-		} catch {
-			return [];
-		}
-	}
-
-	function persistListeningHistory(items: ListeningHistoryItem[]) {
-		try {
-			if (items.length === 0) {
-				localStorage.removeItem(LISTENING_HISTORY_STORAGE_KEY);
-				localStorage.removeItem(LEGACY_LISTENING_HISTORY_STORAGE_KEY);
-				return;
-			}
-
-			localStorage.setItem(LISTENING_HISTORY_STORAGE_KEY, JSON.stringify(items));
-			localStorage.removeItem(LEGACY_LISTENING_HISTORY_STORAGE_KEY);
-		} catch {
-			/* private browsing, storage quota, etc. */
-		}
-	}
-
-	function isListeningHistoryItem(value: unknown): value is ListeningHistoryItem {
-		if (!value || typeof value !== 'object') return false;
-
-		const item = value as Record<string, unknown>;
-		return (
-			typeof item.id === 'string' &&
-			typeof item.title === 'string' &&
-			typeof item.artist === 'string' &&
-			(item.artworkUrl === null || typeof item.artworkUrl === 'string') &&
-			(item.appleMusicUrl === null || typeof item.appleMusicUrl === 'string') &&
-			typeof item.isAppleMusicLookupLoading === 'boolean' &&
-			typeof item.stationName === 'string' &&
-			typeof item.stationTag === 'string' &&
-			typeof item.listenedAt === 'number' &&
-			Number.isFinite(item.listenedAt)
-		);
+		const { url } = (await response.json()) as AppleMusicLookupResponse;
+		return url;
 	}
 
 	function getTrackTiming(track: CurrentTrack | null, nowMs: number) {
 		const bounds = getTrackTimingBounds(track);
 		if (!bounds) return null;
 
-		const elapsedSeconds = Math.min(Math.max(nowMs / 1000 - bounds.startSeconds, 0), bounds.durationSeconds);
+		const elapsedSeconds = Math.min(
+			Math.max(nowMs / 1000 - bounds.startSeconds, 0),
+			bounds.durationSeconds
+		);
 		return {
 			...bounds,
 			elapsedSeconds,
@@ -598,8 +400,9 @@
 	function closeFipInfoOnBackdrop(event: MouseEvent) {
 		if (event.target === fipInfoDialog) void closeFipInfo();
 	}
+
 	async function shareStation() {
-		shareMessage = '';
+		playerSession.setShareMessage('');
 
 		const shareData = {
 			title: selectedStation.name,
@@ -610,114 +413,41 @@
 		try {
 			if (navigator.share) {
 				await navigator.share(shareData);
-				shareMessage = 'Share sheet opened.';
+				playerSession.setShareMessage('Share sheet opened.');
 				return;
 			}
 
 			await navigator.clipboard.writeText(selectedStation.streamUrl);
-			shareMessage = 'Stream link copied.';
+			playerSession.setShareMessage('Stream link copied.');
 		} catch (error) {
 			if (isAbortError(error)) return;
-			shareMessage = 'Sharing is unavailable in this browser.';
+			playerSession.setShareMessage('Sharing is unavailable in this browser.');
 		}
 	}
 
 	async function openCurrentTrackInAppleMusic() {
 		if (!currentTrack) {
-			shareMessage = 'No current track to open.';
+			playerSession.setShareMessage('No current track to open.');
 			return;
 		}
 
-		isAppleMusicLookupLoading = true;
-		shareMessage = '';
+		const track = currentTrack;
+		playerSession.setShareMessage('');
 
 		try {
-			const url = await lookupAppleMusicUrl(currentTrack);
+			const url = await listeningHistory.lookupAppleMusic(track);
 			if (!url) return;
 
 			const appleMusicWindow = window.open(url, '_blank');
 			if (appleMusicWindow) {
 				appleMusicWindow.opener = null;
-				shareMessage = 'Opening Apple Music.';
+				playerSession.setShareMessage('Opening Apple Music.');
 				return;
 			}
 
 			window.location.assign(url);
 		} catch {
-			shareMessage = 'Apple Music lookup failed.';
-		} finally {
-			isAppleMusicLookupLoading = false;
-		}
-	}
-
-	function readCachedCurrentTrack(station: Station) {
-		const cached = currentTrackCache.get(station.apiStation);
-		if (!cached) return false;
-
-		if (Date.now() >= cached.expiresAt) {
-			currentTrackCache.delete(station.apiStation);
-			return false;
-		}
-
-		currentTrack = cached.track;
-		metadataState = 'ready';
-		scheduleNextMetadataRefresh(station, cached.track);
-		return true;
-	}
-
-	function cacheCurrentTrack(station: Station, track: CurrentTrack | null) {
-		const now = Date.now();
-		const expiresAt = getCurrentTrackCacheExpiresAt(now, track?.end);
-		currentTrackCache.set(station.apiStation, { track, expiresAt });
-	}
-
-	function clearNextMetadataRefresh() {
-		if (metadataRefreshTimeout === null) return;
-
-		window.clearTimeout(metadataRefreshTimeout);
-		metadataRefreshTimeout = null;
-	}
-
-	function scheduleNextMetadataRefresh(station: Station, track: CurrentTrack | null) {
-		clearNextMetadataRefresh();
-
-		const delay = getMetadataRefreshDelay(Date.now(), track?.end);
-		metadataRefreshTimeout = window.setTimeout(() => {
-			metadataRefreshTimeout = null;
-			if (station.apiStation !== selectedStation.apiStation) return;
-
-			void loadCurrentTrack(station);
-		}, delay);
-	}
-
-	function recordListeningHistory(track: CurrentTrack, station: Station) {
-		const historySignature = `${station.apiStation}:${track.id}:${track.start}`;
-		if (lastHistorySignature === historySignature) return;
-
-		const appleMusicLookupKey = getAppleMusicLookupKey(track);
-		const cachedAppleMusicUrl = appleMusicUrlCache.get(appleMusicLookupKey);
-		lastHistorySignature = historySignature;
-		listeningHistory.update((items) =>
-			[
-				{
-					id: historySignature,
-					title: track.title,
-					artist: track.artist,
-					artworkUrl: track.artworkUrl,
-					appleMusicUrl: cachedAppleMusicUrl ?? null,
-					isAppleMusicLookupLoading: !appleMusicUrlCache.has(appleMusicLookupKey),
-					stationName: station.name,
-					stationTag: station.tag,
-					listenedAt: Date.now()
-				},
-				...items.filter((item) => item.id !== historySignature)
-			].slice(0, LISTENING_HISTORY_LIMIT)
-		);
-
-		void pulseHistoryArrival();
-
-		if (!appleMusicUrlCache.has(appleMusicLookupKey)) {
-			void loadHistoryAppleMusicUrl(historySignature, track);
+			playerSession.setShareMessage('Apple Music lookup failed.');
 		}
 	}
 
@@ -762,83 +492,21 @@
 		});
 	}
 
-	function getAppleMusicLookupKey(track: Pick<CurrentTrack, 'title' | 'artist'>) {
-		return `${normalizeTrackText(track.title)}:${normalizeTrackText(track.artist)}`;
+	function selectStation(station: Station | string) {
+		void playerSession.selectStation(station);
 	}
 
-	function hasNoAppleMusicMatch(track: Pick<CurrentTrack, 'title' | 'artist'> | null) {
-		if (!track) return false;
-
-		const appleMusicLookupKey = getAppleMusicLookupKey(track);
-		return appleMusicUrlCache.has(appleMusicLookupKey) && appleMusicUrlCache.get(appleMusicLookupKey) === null;
+	function selectAdjacentStation(direction: -1 | 1) {
+		void playerSession.selectAdjacentStation(direction);
 	}
 
-	function cacheAppleMusicUrl(key: string, url: string | null) {
-		if (!appleMusicUrlCache.has(key) && appleMusicUrlCache.size >= APPLE_MUSIC_URL_CACHE_LIMIT) {
-			const oldestKey = appleMusicUrlCache.keys().next().value;
-			if (oldestKey !== undefined) appleMusicUrlCache.delete(oldestKey);
-		}
-		appleMusicUrlCache.set(key, url);
-		appleMusicLookupRevision += 1;
+	function togglePlayback() {
+		playerSession.togglePlayback();
 	}
 
-	async function lookupAppleMusicUrl(track: Pick<CurrentTrack, 'title' | 'artist'>) {
-		const appleMusicLookupKey = getAppleMusicLookupKey(track);
-		if (appleMusicUrlCache.has(appleMusicLookupKey)) {
-			return appleMusicUrlCache.get(appleMusicLookupKey) ?? null;
-		}
-
-		const pendingRequest = appleMusicUrlRequests.get(appleMusicLookupKey);
-		if (pendingRequest) return pendingRequest;
-
-		const request = fetchAppleMusicUrl(track)
-			.then((url) => {
-				cacheAppleMusicUrl(appleMusicLookupKey, url);
-				return url;
-			})
-			.finally(() => {
-				appleMusicUrlRequests.delete(appleMusicLookupKey);
-			});
-
-		appleMusicUrlRequests.set(appleMusicLookupKey, request);
-		return request;
-	}
-
-	async function fetchAppleMusicUrl(track: Pick<CurrentTrack, 'title' | 'artist'>) {
-		const params = new URLSearchParams({
-			title: track.title,
-			artist: track.artist
-		});
-		const response = await fetch(`/api/apple-music?${params}`);
-
-		if (!response.ok) throw new Error('Apple Music lookup failed');
-
-		const { url } = (await response.json()) as AppleMusicLookupResponse;
-		return url;
-	}
-
-	async function loadHistoryAppleMusicUrl(historyId: string, track: CurrentTrack) {
-		const appleMusicLookupKey = getAppleMusicLookupKey(track);
-
-		try {
-			const url = await lookupAppleMusicUrl(track);
-			updateHistoryAppleMusicUrl(historyId, url, false);
-		} catch {
-			cacheAppleMusicUrl(appleMusicLookupKey, null);
-			updateHistoryAppleMusicUrl(historyId, null, false);
-		}
-	}
-
-	function updateHistoryAppleMusicUrl(
-		historyId: string,
-		appleMusicUrl: string | null,
-		isAppleMusicLookupLoading: boolean
-	) {
-		listeningHistory.update((items) =>
-			items.map((item) =>
-				item.id === historyId ? { ...item, appleMusicUrl, isAppleMusicLookupLoading } : item
-			)
-		);
+	function updateVolume(event: Event) {
+		volume = Number((event.currentTarget as HTMLInputElement).value);
+		getAudioAdapter()?.setVolume?.(volume / 100);
 	}
 
 	function formatHistoryTimestamp(timestamp: number) {
@@ -856,139 +524,17 @@
 		return `${historyDateFormatter.format(listenedAt)} · ${time}`;
 	}
 
-	async function loadCurrentTrack(station: Station) {
-		if (station.apiStation !== selectedStation.apiStation) return;
-		const requestId = ++currentTrackRequestId;
-		currentTrackRequest?.abort();
-		currentTrackRequest = null;
-
-		if (readCachedCurrentTrack(station)) return;
-
-		const controller = new AbortController();
-		currentTrackRequest = controller;
-		if (!currentTrack) metadataState = 'loading';
-
-		try {
-			const params = new URLSearchParams({
-				station: station.apiStation,
-				number: station.number,
-				name: station.name
-			});
-			const response = await fetch(`/api/current-track?${params}`, { signal: controller.signal });
-
-			if (!response.ok) throw new Error(`Current track metadata returned HTTP ${response.status}`);
-
-			const track = (await response.json()) as CurrentTrackResponse;
-			if (controller.signal.aborted || !isCurrentTrackRequest(station, requestId)) return;
-
-			currentTrack = track;
-			cacheCurrentTrack(station, track);
-			scheduleNextMetadataRefresh(station, track);
-			metadataState = 'ready';
-		} catch (error) {
-			if (isAbortError(error)) return;
-			if (controller.signal.aborted || !isCurrentTrackRequest(station, requestId)) return;
-
-			metadataState = getMetadataFailureState(currentTrack !== null);
-			scheduleNextMetadataRefresh(station, currentTrack);
-		} finally {
-			if (currentTrackRequest === controller) currentTrackRequest = null;
-		}
-	}
-
-	function isCurrentTrackRequest(station: Station, requestId: number) {
-		return requestId === currentTrackRequestId && station.apiStation === selectedStation.apiStation;
-	}
-
-	function applyVolume() {
-		if (!audioElement) return;
-		audioElement.volume = volume / 100;
-	}
-
-	async function play({ reload = false }: { reload?: boolean } = {}) {
-		if (!audioElement) return;
-
-		const requestId = ++playRequestId;
-		playbackState = 'loading';
-		playbackError = '';
-		applyVolume();
-		if (reload) audioElement.load();
-
-		try {
-			await audioElement.play();
-			if (requestId === playRequestId) playbackState = 'playing';
-		} catch {
-			if (requestId !== playRequestId) return;
-
-			playbackState = 'error';
-			playbackError = 'Playback was blocked or the stream is unavailable.';
-			playbackRecovery?.notePlaybackStopped();
-		}
-	}
-
-	function notePlaybackInterrupted() {
-		if (!hasActivePlayback) return;
-
-		playbackState = 'loading';
-		playbackRecovery?.notePlaybackInterrupted();
-	}
-
-	function pause() {
-		playRequestId += 1;
-		audioElement?.pause();
-		playbackState = 'paused';
-		playbackRecovery?.notePlaybackStopped();
-	}
-
-	function togglePlayback() {
-		if (hasActivePlayback) {
-			pause();
-			return;
-		}
-
-		void play();
-	}
-
-	async function selectStation(station: Station) {
-		if (station.name === selectedStationName) {
-			if (!hasActivePlayback) void play();
-			return;
-		}
-
-		playRequestId += 1;
-		playbackRecovery?.notePlaybackStopped();
-		selectedStationName = station.name;
-		persistSelectedStationName(station.name);
-		playbackError = '';
-		shareMessage = '';
-		currentTrack = null;
-		clearNextMetadataRefresh();
-		void loadCurrentTrack(station);
-		playbackState = 'loading';
-
-		await tick();
-		await play({ reload: true });
-	}
-
-	function selectAdjacentStation(direction: -1 | 1) {
-		const currentIndex = stations.findIndex((station) => station.name === selectedStationName);
-		const nextIndex = (currentIndex + direction + stations.length) % stations.length;
-		void selectStation(stations[nextIndex]);
-	}
-
-	function updateVolume(event: Event) {
-		volume = Number((event.currentTarget as HTMLInputElement).value);
-		applyVolume();
-	}
-
-	function toggleFavorite(name: string) {
-		const station = stations.find((s) => s.name === name);
+	function toggleFavorite(identity: string) {
+		const station = stations.find((candidate) =>
+			candidate.id === identity || candidate.name === identity
+		);
 		if (!station) return;
 
 		station.favorite = !station.favorite;
-		persistFavoriteStations();
+		persistFavoriteStations(stations, browserStorage);
 	}
 </script>
+
 
 <svelte:head>
 	<title>{selectedStation.name} · Frisson</title>
@@ -1002,22 +548,11 @@
 	bind:this={audioElement}
 	src={selectedStation.streamUrl}
 	preload="none"
-	onplaying={() => {
-		playbackState = 'playing';
-		playbackError = '';
-		playbackRecovery?.notePlaybackHealthy();
-	}}
-	onwaiting={notePlaybackInterrupted}
-	onstalled={notePlaybackInterrupted}
-	onpause={() => {
-		if (playbackState !== 'error') playbackState = 'paused';
-		playbackRecovery?.notePlaybackStopped();
-	}}
-	onerror={() => {
-		playbackState = 'error';
-		playbackError = 'The selected FIP stream could not be loaded.';
-		playbackRecovery?.notePlaybackStopped();
-	}}
+	onplaying={() => playerSession.handleAudioEvent('playing')}
+	onwaiting={() => playerSession.handleAudioEvent('waiting')}
+	onstalled={() => playerSession.handleAudioEvent('stalled')}
+	onpause={() => playerSession.handleAudioEvent('pause')}
+	onerror={() => playerSession.handleAudioEvent('error')}
 ></audio>
 
 <dialog
@@ -1170,7 +705,7 @@
 							: `Add ${selectedStation.name} to favorites`}
 						aria-pressed={selectedStation.favorite}
 						class="{iconHit} {pressable} size-9 {selectedStation.favorite ? 'bg-accent-subtle text-accent' : 'border border-divider text-ink-tertiary/50 hover:bg-canvas hover:text-ink-tertiary'}"
-						onclick={() => toggleFavorite(selectedStation.name)}
+						onclick={() => toggleFavorite(selectedStation.id)}
 					>
 						<svg viewBox="0 0 24 24" class="size-4" fill="currentColor" aria-hidden="true">
 							<path
@@ -1234,11 +769,8 @@
 			<div class="mt-10">
 				<Tuner
 					{stations}
-					selectedName={selectedStationName}
-					onSelect={(name) => {
-						const station = stations.find((s) => s.name === name);
-						if (station) void selectStation(station);
-					}}
+					selectedId={sessionState.selectedStationId}
+					onSelect={selectStation}
 				/>
 			</div>
 
@@ -1449,7 +981,7 @@
 				</h2>
 				<ul aria-labelledby="stations-heading">
 					{#each stations as s (s.name)}
-						{@const active = s.name === selectedStationName}
+						{@const active = s.id === sessionState.selectedStationId}
 						<li class="flex items-center border-b border-divider last:border-0">
 							<button
 								type="button"
@@ -1481,7 +1013,7 @@
 								class="{iconHit} {pressable} size-8 shrink-0 {s.favorite
 									? 'text-accent'
 									: 'text-ink-tertiary/40 hover:text-ink-tertiary'}"
-								onclick={() => toggleFavorite(s.name)}
+								onclick={() => toggleFavorite(s.id)}
 							>
 								<svg viewBox="0 0 24 24" class="size-3.5" fill="currentColor" aria-hidden="true">
 									<path
@@ -1506,18 +1038,18 @@
 						Listening history
 					</h2>
 					<span class="rounded-full bg-canvas px-2 py-1 text-xs tabular-nums text-ink-tertiary">
-						{$listeningHistory.length}/{LISTENING_HISTORY_LIMIT}
+						{historyItems.length}/{LISTENING_HISTORY_LIMIT}
 					</span>
 				</div>
 
-				{#if $listeningHistory.length}
+				{#if historyItems.length}
 					<ol
 						class="history-scroll-mask mt-4 space-y-2 pr-1 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:overscroll-contain"
 						aria-label="Tracks listened to in this session"
 						aria-live="polite"
 						aria-relevant="additions"
 					>
-						{#each $listeningHistory as item, index (item.id)}
+						{#each historyItems as item, index (item.id)}
 							<li
 								out:fade={{ duration: prefersReducedMotion.current ? 0 : 90 }}
 								animate:flip={{ duration: prefersReducedMotion.current ? 0 : 220, easing: cubicOut }}
@@ -1555,6 +1087,7 @@
 											appleMusicMode="link"
 											appleMusicHref={item.appleMusicUrl}
 											appleMusicLoading={item.isAppleMusicLookupLoading}
+											appleMusicUnavailableLabel={item.appleMusicUrl === null && !item.isAppleMusicLookupLoading ? 'Unavailable' : ''}
 											badgeLabel={index === 0 ? 'Latest' : ''}
 											titleFirst
 											{pressable}

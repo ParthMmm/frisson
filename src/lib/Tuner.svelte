@@ -6,16 +6,16 @@
 	// near the pointer for a fluid proximity effect. Adapted from
 	// https://devouringdetails.com/prototypes/line-minimap, driven by
 	// svelte/motion so position changes stay transform-only and interruption-safe.
-	type TunerStation = { name: string; tag: string };
+	type TunerStation = { id: string; name: string; tag: string };
 
 	let {
 		stations,
-		selectedName,
+		selectedId,
 		onSelect
 	}: {
 		stations: TunerStation[];
-		selectedName: string;
-		onSelect: (name: string) => void;
+		selectedId: string;
+		onSelect: (id: string) => void;
 	} = $props();
 
 	const LINE_WIDTH = 1;
@@ -34,7 +34,7 @@
 	const selectedIndex = $derived(
 		Math.max(
 			0,
-			stations.findIndex((s) => s.name === selectedName)
+			stations.findIndex((s) => s.id === selectedId)
 		)
 	);
 
@@ -114,7 +114,7 @@
 	function handleInput(event: Event) {
 		const index = Number((event.currentTarget as HTMLInputElement).value);
 		const station = stations[index];
-		if (station) onSelect(station.name);
+		if (station) onSelect(station.id);
 	}
 </script>
 

@@ -77,7 +77,10 @@ export function createPlaybackRecovery({
 
 			await recover();
 		} finally {
-			setRecoveryPending(false);
+			// A fresh interruption may have scheduled another ticket while the
+			// reload was awaiting audio.play(). The older retry must not clear
+			// that newer pending state.
+			if (ticket === recoveryTicket) setRecoveryPending(false);
 		}
 	}
 

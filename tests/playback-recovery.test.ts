@@ -149,3 +149,37 @@ function createRecoveryHarness(isPlaybackExpected = true): RecoveryHarness {
 	timers.advanceBy(PLAYBACK_RECOVERY_DELAY_MS);
 	assertEqual(getRecoveryCount(), 0, 'unexpected playback does not schedule recovery');
 }
+
+{
+	const timers = new FakeTimers();
+	const recoveryResolves: (() => void)[] = [];
+	const pendingChanges: boolean[] = [];
+	const controller = createPlaybackRecovery({
+		audio: () => audio,
+		isPlaybackExpected: () => true,
+		recover: () =>
+			new Promise<void>((resolve) => {
+				recoveryResolves.push(resolve);
+			}),
+		setTimer: timers.setTimer,
+		clearTimer: timers.clearTimer,
+		onRecoveryPendingChange: (pending) => pendingChanges.push(pending),
+	});
+
+	controller.notePlaybackInterrupted();
+	timers.advanceBy(PLAYBACK_RECOVERY_DELAY_MS);
+	controller.notePlaybackInterrupted();
+	timers.advanceBy(PLAYBACK_RECOVERY_DELAY_MS);
+	assertEqual(recoveryResolves.length, 2, 'a fresh interruption can schedule a second retry');
+	recoveryResolves[0]?.();
+	await Promise.resolve();
+	assertEqual(
+		pendingChanges.join(','),
+		'true',
+		'an older retry does not clear newer pending state',
+	);
+	recoveryResolves[1]?.();
+	await Promise.resolve();
+	assertEqual(pendingChanges.join(','), 'true,false', 'the current retry clears pending state');
+	controller.dispose();
+}
