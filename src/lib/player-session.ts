@@ -42,6 +42,16 @@ export interface PlayerSessionHistory {
 	record(track: CurrentTrack, station: StationCatalogEntry): unknown;
 }
 
+export type PlayerSessionScrobblerInput = {
+	track: CurrentTrack | null;
+	station: StationCatalogEntry;
+	playbackState: PlaybackState;
+};
+
+export interface PlayerSessionScrobbler {
+	notify(input: PlayerSessionScrobblerInput): void;
+}
+
 export type PlayerSessionState = {
 	selectedStationId: string;
 	selectedStation: StationCatalogEntry;
@@ -61,6 +71,7 @@ export interface PlayerSessionOptions {
 	) => Promise<CurrentTrack | null>;
 	audio: () => PlayerAudioAdapter | null | undefined;
 	history?: PlayerSessionHistory;
+	scrobbler?: PlayerSessionScrobbler;
 	persistSelectedStation?: (stationId: string) => void;
 	waitForStationUpdate?: () => Promise<unknown>;
 	getVolume?: () => number;
@@ -133,6 +144,11 @@ export function createPlayerSession(options: PlayerSessionOptions): PlayerSessio
 		if (state.currentTrack && isPlaybackExpected()) {
 			options.history?.record(state.currentTrack, state.selectedStation);
 		}
+		options.scrobbler?.notify({
+			track: state.currentTrack,
+			station: state.selectedStation,
+			playbackState: state.playbackState,
+		});
 		for (const listener of listeners) listener(state);
 	}
 

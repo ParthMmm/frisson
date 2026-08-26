@@ -1,5 +1,8 @@
 node_modules
 
+# Local planning / PRD drafts
+plans/
+
 # Output
 .output
 .vercel

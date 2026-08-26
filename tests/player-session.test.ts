@@ -2,6 +2,7 @@ import {
 	createPlayerSession,
 	METADATA_SAFETY_POLL_MS,
 	type PlayerAudioAdapter,
+	type PlayerSessionScrobblerInput,
 	type PlayerSessionTimers,
 } from '../src/lib/player-session';
 import { PLAYBACK_RECOVERY_DELAY_MS } from '../src/lib/playback-recovery';
@@ -179,6 +180,62 @@ function makeTrack(id: string, start = 100): CurrentTrack {
 	session.dispose();
 	timers.advanceBy(METADATA_SAFETY_POLL_MS * 2);
 	assertEqual(calls, 2, 'disposed session no longer polls');
+}
+
+{
+	const timers = new FakeTimers();
+	const notifies: PlayerSessionScrobblerInput[] = [];
+	const historyStates: string[] = [];
+	let paused = true;
+	const audio: PlayerAudioAdapter = {
+		getSnapshot: () => ({ paused, ended: false }),
+		play: () => {
+			paused = false;
+			return Promise.resolve();
+		},
+		pause: () => {
+			paused = true;
+		},
+		load: () => undefined,
+	};
+	let resolveTrack: (track: CurrentTrack) => void = () => undefined;
+	const session = createPlayerSession({
+		initialStationId: 'FIP',
+		fetchCurrentTrack: () =>
+			new Promise((resolve) => {
+				resolveTrack = resolve;
+			}),
+		audio: () => audio,
+		timers,
+		now: () => timers.now,
+		history: {
+			record: () => {
+				historyStates.push(session.getState().playbackState);
+			},
+		},
+		scrobbler: {
+			notify: (input) => {
+				notifies.push({
+					track: input.track,
+					station: input.station,
+					playbackState: input.playbackState,
+				});
+			},
+		},
+	});
+	session.start();
+	resolveTrack(makeTrack('now'));
+	for (let index = 0; index < 8; index += 1) await Promise.resolve();
+	await session.play();
+	session.pause();
+	const playbackStates = notifies.map((input) => input.playbackState);
+	assert(playbackStates.includes('playing'), 'play notifies the scrobbler');
+	assert(playbackStates.includes('paused'), 'pause notifies the scrobbler after play');
+	assert(
+		!historyStates.includes('paused'),
+		'pause does not record history even though the scrobbler is notified',
+	);
+	session.dispose();
 }
 
 assert(getStationById('FIP') !== null, 'session tests use catalog identities');

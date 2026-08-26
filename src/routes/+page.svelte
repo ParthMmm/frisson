@@ -7,6 +7,16 @@
 	import { isAbortError } from '$lib/errors';
 	import type { AppleMusicLookupResponse, CurrentTrack } from '$lib/api';
 	import {
+		createLastFmScrobbler,
+		type LastFmLifecycle,
+		type LastFmPublicSession,
+		type LastFmScrobbleSubmission,
+		type LastFmScrobbleTransport,
+		type LastFmScrobblerSnapshot,
+		type LastFmWriteResult,
+		type LastFmWriteTrack
+	} from '$lib/lastfm-scrobbler';
+	import {
 		createListeningHistory,
 		LISTENING_HISTORY_LIMIT,
 		type ListeningHistorySnapshot
@@ -47,11 +57,60 @@
 		removeItem: (key) => localStorage.removeItem(key)
 	};
 
+	const lastFmWriteRetryable: LastFmWriteResult = {
+		ok: false,
+		retryable: true,
+		invalidSession: false
+	};
+
+	async function postLastFmWrite(
+		path: string,
+		body: LastFmWriteTrack | LastFmScrobbleSubmission
+	): Promise<LastFmWriteResult> {
+		try {
+			const response = await fetch(path, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(body)
+			});
+			return (await response.json()) as LastFmWriteResult;
+		} catch {
+			return lastFmWriteRetryable;
+		}
+	}
+
+	const lastFmBrowserTransport: LastFmScrobbleTransport = {
+		getSession: async () => {
+			const response = await fetch('/api/lastfm/session');
+			if (!response.ok) throw new Error(`Last.fm session HTTP ${response.status}`);
+			return (await response.json()) as LastFmPublicSession;
+		},
+		disconnect: async () => {
+			const response = await fetch('/api/lastfm/session', { method: 'DELETE' });
+			if (!response.ok) throw new Error(`Last.fm disconnect HTTP ${response.status}`);
+		},
+		updateNowPlaying: (track) => postLastFmWrite('/api/lastfm/now-playing', track),
+		scrobble: (submission) => postLastFmWrite('/api/lastfm/scrobble', submission)
+	};
+
+	const lastFmLifecycle: LastFmLifecycle | undefined =
+		typeof window === 'undefined'
+			? undefined
+			: {
+					addEventListener(type, listener) {
+						window.addEventListener(type, listener);
+					},
+					removeEventListener(type, listener) {
+						window.removeEventListener(type, listener);
+					}
+				};
+
 	let stations = $state<Station[]>(createStationList());
 	let theme = $state<'light' | 'dark'>('light');
 	let volume = $state(80);
 	let audioElement = $state<HTMLAudioElement>();
 	let fipInfoDialog: HTMLDialogElement | undefined = $state();
+	let lastFmDialog: HTMLDialogElement | undefined = $state();
 	let currentTrackClockMs = $state(Date.now());
 	let historyState = $state<ListeningHistorySnapshot>({ items: [], revision: 0 });
 	let historyHydrated = false;
@@ -59,16 +118,24 @@
 	const listeningHistory = createListeningHistory({
 		lookupAppleMusicUrl: fetchAppleMusicUrl
 	});
+	const lastFm = createLastFmScrobbler({
+		storage: browserStorage,
+		transport: lastFmBrowserTransport,
+		redirect: (url) => window.location.assign(url),
+		lifecycle: lastFmLifecycle
+	});
 	const playerSession = createPlayerSession({
 		initialStationId: DEFAULT_SELECTED_STATION_ID,
 		fetchCurrentTrack,
 		audio: getAudioAdapter,
 		history: listeningHistory,
+		scrobbler: lastFm,
 		persistSelectedStation: (stationId) => persistSelectedStationId(stationId, browserStorage),
 		waitForStationUpdate: () => tick(),
 		getVolume: () => volume
 	});
 	let sessionState = $state<PlayerSessionState>(playerSession.getState());
+	let lastFmState = $state<LastFmScrobblerSnapshot>(lastFm.getState());
 
 	// Shared Tailwind class strings instead of custom CSS classes — one
 	// definition, applied wherever a button needs it, no `@layer components`.
@@ -92,6 +159,11 @@
 	});
 
 	const fipInfoMotion = new Tween(0, {
+		duration: () => (prefersReducedMotion.current ? 0 : 220),
+		easing: quintOut
+	});
+
+	const lastFmMotion = new Tween(0, {
 		duration: () => (prefersReducedMotion.current ? 0 : 220),
 		easing: quintOut
 	});
@@ -130,6 +202,19 @@
 	const fipInfoScale = $derived(0.96 + fipInfoMotion.current * 0.04);
 	const fipInfoOffset = $derived((1 - fipInfoMotion.current) * 10);
 	const fipInfoBackdropOpacity = $derived(fipInfoMotion.current);
+	const lastFmScale = $derived(0.96 + lastFmMotion.current * 0.04);
+	const lastFmOffset = $derived((1 - lastFmMotion.current) * 10);
+	const lastFmBackdropOpacity = $derived(lastFmMotion.current);
+	const lastFmConnected = $derived(lastFmState.status === 'connected');
+	const lastFmHeaderLabel = $derived(
+		lastFmState.status === 'connected'
+			? lastFmState.username
+				? `Last.fm connected as ${lastFmState.username}`
+				: 'Last.fm connected'
+			: lastFmState.status === 'expired'
+				? 'Reconnect Last.fm'
+				: 'Connect Last.fm'
+	);
 	const trackTiming = $derived(getTrackTiming(currentTrack, currentTrackClockMs));
 	const playbackProgress = $derived(trackTiming?.progress ?? (isPlaying ? 1 : isLoading ? 0.35 : 0));
 	const currentTrackTimeLabel = $derived(
@@ -279,13 +364,19 @@
 		});
 		listeningHistory.load(browserStorage);
 		historyHydrated = true;
+		const unsubscribeLastFm = lastFm.subscribe((nextState) => {
+			lastFmState = nextState;
+		});
+		void lastFm.hydrate();
 		playerSession.start(persistedStationId ?? DEFAULT_SELECTED_STATION_ID);
 
 		return () => {
 			unsubscribeSession();
 			unsubscribeHistory();
+			unsubscribeLastFm();
 			playerSession.dispose();
 			listeningHistory.dispose();
+			lastFm.dispose();
 		};
 	});
 
@@ -399,6 +490,42 @@
 
 	function closeFipInfoOnBackdrop(event: MouseEvent) {
 		if (event.target === fipInfoDialog) void closeFipInfo();
+	}
+
+	async function openLastFm() {
+		if (!lastFmDialog || lastFmDialog.open) return;
+
+		await lastFmMotion.set(0, { duration: 0 });
+		lastFmDialog.showModal();
+		await tick();
+		void lastFmMotion.set(1);
+	}
+
+	async function closeLastFm() {
+		if (!lastFmDialog?.open) return;
+
+		await lastFmMotion.set(0, {
+			duration: prefersReducedMotion.current ? 0 : 160,
+			easing: quintOut
+		});
+		lastFmDialog.close();
+	}
+
+	function cancelLastFmClose(event: Event) {
+		event.preventDefault();
+		void closeLastFm();
+	}
+
+	function closeLastFmOnBackdrop(event: MouseEvent) {
+		if (event.target === lastFmDialog) void closeLastFm();
+	}
+
+	function connectLastFm() {
+		lastFm.connect();
+	}
+
+	async function disconnectLastFm() {
+		await lastFm.disconnect();
 	}
 
 	async function shareStation() {
@@ -592,6 +719,71 @@
 				Frisson streams FIP and its themed stations, shows what's playing, and keeps track of what you've heard.
 			</p>
 		</div>
+	</div>
+</dialog>
+
+<dialog
+	bind:this={lastFmDialog}
+	aria-labelledby="lastfm-title"
+	class="fip-info-dialog m-auto w-[min(92vw,28rem)] rounded-card border border-divider bg-surface p-0 text-ink shadow-2xl will-change-[opacity,transform]"
+	style:--fip-info-backdrop-opacity={lastFmBackdropOpacity}
+	style:opacity={lastFmMotion.current}
+	style:transform={`translateY(${lastFmOffset}px) scale(${lastFmScale})`}
+	oncancel={cancelLastFmClose}
+	onclick={closeLastFmOnBackdrop}
+>
+	<div class="p-6 sm:p-7">
+		<div class="flex items-start justify-between gap-4">
+			<h2 id="lastfm-title" class="text-2xl font-extrabold tracking-tight text-ink">
+				Last.fm
+			</h2>
+			<button
+				type="button"
+				aria-label="Close Last.fm"
+				class="{iconHit} {pressable} size-9 shrink-0 border border-divider text-ink-secondary hover:bg-canvas"
+				onclick={closeLastFm}
+			>
+				<svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M6 6l12 12M18 6 6 18" />
+				</svg>
+			</button>
+		</div>
+		<div class="mt-4 space-y-3 text-sm leading-6 text-ink-secondary">
+			{#if lastFmState.status === 'connected'}
+				<p>
+					Scrobbling as @{lastFmState.username}. Radio scrobbles are marked as not chosen by you.
+				</p>
+			{:else if lastFmState.status === 'expired'}
+				<p>Session expired. Reconnect to resume scrobbling.</p>
+			{:else}
+				<p>Scrobble FIP tracks to your Last.fm account.</p>
+			{/if}
+		</div>
+		{#if lastFmState.status === 'connected'}
+			<button
+				type="button"
+				class="{pressable} mt-6 w-full rounded-2xl border border-divider py-3 text-sm font-semibold text-ink-secondary hover:bg-canvas"
+				onclick={disconnectLastFm}
+			>
+				Disconnect
+			</button>
+		{:else if lastFmState.status === 'expired'}
+			<button
+				type="button"
+				class="{pressable} mt-6 w-full rounded-2xl bg-ink py-3 text-sm font-semibold text-surface hover:bg-ink/90"
+				onclick={connectLastFm}
+			>
+				Connect again
+			</button>
+		{:else}
+			<button
+				type="button"
+				class="{pressable} mt-6 w-full rounded-2xl bg-ink py-3 text-sm font-semibold text-surface hover:bg-ink/90"
+				onclick={connectLastFm}
+			>
+				Connect Last.fm
+			</button>
+		{/if}
 	</div>
 </dialog>
 
@@ -1037,9 +1229,43 @@
 					>
 						Listening history
 					</h2>
-					<span class="rounded-full bg-canvas px-2 py-1 text-xs tabular-nums text-ink-tertiary">
-						{historyItems.length}/{LISTENING_HISTORY_LIMIT}
-					</span>
+					<div class="flex items-center gap-3">
+						<button
+							type="button"
+							aria-label={lastFmHeaderLabel}
+							aria-haspopup="dialog"
+							class="{pressable} relative flex shrink-0 items-center justify-center {lastFmConnected &&
+							lastFmState.username
+								? 'h-8 gap-1.5 rounded-xl bg-accent-subtle px-2.5 text-accent before:absolute before:-inset-2 before:content-[\'\']'
+								: `${iconHit} size-8 ${
+										lastFmConnected
+											? 'bg-accent-subtle text-accent'
+											: 'border border-divider text-ink-tertiary hover:bg-canvas hover:text-ink-secondary'
+									}`}"
+							onclick={openLastFm}
+						>
+							<svg
+								viewBox="0 0 24 24"
+								class="size-3.5 shrink-0"
+								fill="currentColor"
+								aria-hidden="true"
+							>
+								<path
+									d="M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.42 0 3.189 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.595 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.87.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z"
+								/>
+							</svg>
+							{#if lastFmConnected && lastFmState.username}
+								<span class="max-w-24 truncate text-xs leading-none font-medium"
+									>@{lastFmState.username}</span
+								>
+							{/if}
+						</button>
+						<span
+							class="flex h-8 items-center rounded-full bg-canvas px-2.5 text-xs leading-none tabular-nums text-ink-tertiary"
+						>
+							{historyItems.length}/{LISTENING_HISTORY_LIMIT}
+						</span>
+					</div>
 				</div>
 
 				{#if historyItems.length}

@@ -3,8 +3,12 @@
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
+	"engines": {
+		"node": ">=24"
+	},
 	"scripts": {
 		"dev": "vite dev",
+		"dev:portless": "portless frisson vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",
@@ -14,7 +18,7 @@
 		"lint:fix": "oxlint --fix",
 		"fmt": "oxfmt",
 		"fmt:check": "oxfmt --check",
-		"test": "bun tests/metadata-refresh.test.ts && bun tests/playback-recovery.test.ts && bun tests/current-track.test.ts && bun tests/station-catalog.test.ts && bun tests/radio-france-intake.test.ts && bun tests/listening-history.test.ts && bun tests/player-session.test.ts"
+		"test": "bun tests/metadata-refresh.test.ts && bun tests/playback-recovery.test.ts && bun tests/current-track.test.ts && bun tests/station-catalog.test.ts && bun tests/radio-france-intake.test.ts && bun tests/listening-history.test.ts && bun tests/lastfm-scrobbler.test.ts && bun tests/lastfm-api.test.ts && bun tests/player-session.test.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-cloudflare": "^7.2.9",
@@ -24,6 +28,7 @@
 		"@tailwindcss/vite": "^4.3.0",
 		"oxfmt": "^0.56.0",
 		"oxlint": "^1.71.0",
+		"portless": "^0.15.5",
 		"svelte": "^5.56.1",
 		"svelte-check": "^4.6.0",
 		"tailwindcss": "^4.3.0",
